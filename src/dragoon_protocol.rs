@@ -10,7 +10,7 @@ pub struct DragoonProtocol();
 #[derive(Clone)]
 pub struct DragoonCodec();
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileRequest(String);
+pub struct FileRequest(String);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileResponse(Vec<u8>);
 
