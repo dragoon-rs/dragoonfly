@@ -1,11 +1,13 @@
 use std::error::Error;
 use std::iter;
+use libp2p::futures::channel::{mpsc, oneshot};
 use libp2p::futures::StreamExt;
 use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_kad::store::MemoryStore;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
+use libp2p_core::Multiaddr;
 use libp2p_swarm::{NetworkBehaviour, Swarm};
 use tracing::info;
 use libp2p_request_response::ProtocolSupport;
@@ -54,22 +56,46 @@ impl From<KademliaEvent> for DragoonEvent {
     }
 }
 
+#[derive(Debug)]
+pub enum DragoonCommand {
+    DragoonTest {
+        file_name: String,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+    },
+}
+
 pub struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
+    command_receiver: mpsc::Receiver<DragoonCommand>,
 }
 
 impl DragoonNetwork {
-    pub fn new(swarm: Swarm<DragoonBehaviour>) -> Self {
-        Self { swarm }
+    pub fn new(swarm: Swarm<DragoonBehaviour>, command_receiver: mpsc::Receiver<DragoonCommand>) -> Self {
+        Self { swarm, command_receiver }
     }
 
     pub async fn run(mut self){
         info!("Starting Dragoon Network");
         self.swarm.listen_on("/ip4/127.0.0.1/tcp/31000".parse().unwrap()).expect("Listening not to fail.");
         loop {
-            match self.swarm.next().await {
-                e => println!("{:?}",e),
+            futures::select! {
+                e = self.swarm.next() => println!("{:?}",e),
+                cmd = self.command_receiver.next() =>  match cmd {
+                    Some(c) => self.handle_command(c).await,
+                    None => return,
+                }
             }
         }
     }
+
+    async fn handle_command(&mut self, cmd: DragoonCommand) {
+        match cmd {
+            DragoonCommand::DragoonTest {file_name, sender} => {
+                info!(file_name);
+                sender.send(Ok(())).expect("TODO: panic message");
+            }
+            _ => {}
+        }
+    }
+
 }

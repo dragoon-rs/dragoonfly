@@ -18,5 +18,5 @@ async-trait = { version = "0.1.74", features = [] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.17"
-
-
+futures = "0.3"
+axum = "0.6.20"
