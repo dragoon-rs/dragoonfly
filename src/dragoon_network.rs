@@ -84,7 +84,7 @@ impl DragoonNetwork {
             .expect("Listening not to fail.");
         loop {
             futures::select! {
-                e = self.swarm.next() => println!("{:?}",e),
+                e = self.swarm.next() => info!("{:?}",e),
                 cmd = self.command_receiver.next() =>  match cmd {
                     Some(c) => self.handle_command(c).await,
                     None => return,

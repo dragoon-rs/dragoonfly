@@ -16,7 +16,7 @@ use tracing::info;
 use crate::dragoon_network::{DragoonCommand, DragoonNetwork};
 
 async fn toto(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand>) {
-    println!("user id {}", user_id);
+    info!("user id {}", user_id);
     let (sender, receiver) = oneshot::channel();
     cmd_sender
         .send(DragoonCommand::DragoonTest {
