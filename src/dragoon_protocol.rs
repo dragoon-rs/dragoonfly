@@ -1,9 +1,9 @@
-use std::io;
 use async_trait::async_trait;
-use libp2p::core::ProtocolName;
 use libp2p::core::upgrade::{read_length_prefixed, write_length_prefixed};
+use libp2p::core::ProtocolName;
 use libp2p::futures::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use libp2p::{request_response};
+use libp2p::request_response;
+use std::io;
 
 #[derive(Debug, Clone)]
 pub struct DragoonProtocol();
@@ -31,8 +31,8 @@ impl request_response::Codec for DragoonCodec {
         _: &DragoonProtocol,
         io: &mut T,
     ) -> io::Result<Self::Request>
-        where
-            T: AsyncRead + Unpin + Send,
+    where
+        T: AsyncRead + Unpin + Send,
     {
         let vec = read_length_prefixed(io, 1_000_000).await?;
 
@@ -48,8 +48,8 @@ impl request_response::Codec for DragoonCodec {
         _: &DragoonProtocol,
         io: &mut T,
     ) -> io::Result<Self::Response>
-        where
-            T: AsyncRead + Unpin + Send,
+    where
+        T: AsyncRead + Unpin + Send,
     {
         let vec = read_length_prefixed(io, 500_000_000).await?; // update transfer maximum
 
@@ -66,8 +66,8 @@ impl request_response::Codec for DragoonCodec {
         io: &mut T,
         FileRequest(data): FileRequest,
     ) -> io::Result<()>
-        where
-            T: AsyncWrite + Unpin + Send,
+    where
+        T: AsyncWrite + Unpin + Send,
     {
         write_length_prefixed(io, data).await?;
         io.close().await?;
@@ -81,8 +81,8 @@ impl request_response::Codec for DragoonCodec {
         io: &mut T,
         FileResponse(data): FileResponse,
     ) -> io::Result<()>
-        where
-            T: AsyncWrite + Unpin + Send,
+    where
+        T: AsyncWrite + Unpin + Send,
     {
         write_length_prefixed(io, data).await?;
         io.close().await?;
