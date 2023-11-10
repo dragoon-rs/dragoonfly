@@ -1,18 +1,17 @@
-use std::error::Error;
-use std::iter;
+use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
 use libp2p::futures::channel::{mpsc, oneshot};
 use libp2p::futures::StreamExt;
-use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
-use libp2p_kad::{Kademlia, KademliaEvent};
-use libp2p_kad::store::MemoryStore;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
-use libp2p_core::Multiaddr;
-use libp2p_swarm::{NetworkBehaviour, Swarm};
-use tracing::info;
+use libp2p_kad::store::MemoryStore;
+use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
+use libp2p_swarm::{NetworkBehaviour, Swarm};
+use std::error::Error;
+use std::iter;
+use tracing::info;
 
-pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>>{
+pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
     let peer_id = id_keys.public().to_peer_id();
     let swarm = Swarm::with_threadpool_executor(
         libp2p::development_transport(id_keys).await?,
@@ -28,8 +27,6 @@ pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, B
     );
     Ok(swarm)
 }
-
-
 
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "DragoonEvent")]
@@ -70,13 +67,21 @@ pub struct DragoonNetwork {
 }
 
 impl DragoonNetwork {
-    pub fn new(swarm: Swarm<DragoonBehaviour>, command_receiver: mpsc::Receiver<DragoonCommand>) -> Self {
-        Self { swarm, command_receiver }
+    pub fn new(
+        swarm: Swarm<DragoonBehaviour>,
+        command_receiver: mpsc::Receiver<DragoonCommand>,
+    ) -> Self {
+        Self {
+            swarm,
+            command_receiver,
+        }
     }
 
-    pub async fn run(mut self){
+    pub async fn run(mut self) {
         info!("Starting Dragoon Network");
-        self.swarm.listen_on("/ip4/127.0.0.1/tcp/31000".parse().unwrap()).expect("Listening not to fail.");
+        self.swarm
+            .listen_on("/ip4/127.0.0.1/tcp/31000".parse().unwrap())
+            .expect("Listening not to fail.");
         loop {
             futures::select! {
                 e = self.swarm.next() => println!("{:?}",e),
@@ -90,12 +95,10 @@ impl DragoonNetwork {
 
     async fn handle_command(&mut self, cmd: DragoonCommand) {
         match cmd {
-            DragoonCommand::DragoonTest {file_name, sender} => {
+            DragoonCommand::DragoonTest { file_name, sender } => {
                 info!(file_name);
                 sender.send(Ok(())).expect("TODO: panic message");
             }
-            _ => {}
         }
     }
-
 }
