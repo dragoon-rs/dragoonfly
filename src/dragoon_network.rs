@@ -9,9 +9,10 @@ use libp2p_request_response::ProtocolSupport;
 use libp2p_swarm::{NetworkBehaviour, Swarm};
 use std::error::Error;
 use std::iter;
-use tracing::info;
+use tracing::{error, info};
+use DragoonError::BadListener;
 
-use crate::commands::DragoonCommand;
+use crate::commands::{DragoonCommand, DragoonError};
 use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
 
 pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
@@ -89,13 +90,20 @@ impl DragoonNetwork {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
                 info!("listening on {}", multiaddr);
-                let listener_id = self
-                    .swarm
-                    .listen_on(multiaddr.parse().unwrap())
-                    .expect(&format!("could not listen on {}", multiaddr));
-                sender
-                    .send(Ok(listener_id))
-                    .expect("could not send listener ID");
+                if let Ok(addr) = multiaddr.parse() {
+                    let listener_id = self
+                        .swarm
+                        .listen_on(addr)
+                        .expect(&format!("could not listen on {}", multiaddr));
+                    sender
+                        .send(Ok(listener_id))
+                        .expect("could not send listener ID");
+                } else {
+                     if sender.send(Err(Box::new(BadListener))).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
+
             }
             DragoonCommand::GetListeners { sender } => {
                 info!("getting listeners");
