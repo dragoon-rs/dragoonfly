@@ -62,7 +62,7 @@ pub enum DragoonCommand {
         multiaddr: String,
         sender: oneshot::Sender<Result<ListenerId, Box<dyn Error + Send>>>,
     },
-    GetListener {
+    GetListeners {
         sender: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn Error + Send>>>,
     },
     GetPeerId {
@@ -108,7 +108,7 @@ impl DragoonNetwork {
                     .expect(&format!("could not listen on {}", multiaddr));
                 sender.send(Ok(listener_id)).expect("could not send listener ID");
             }
-            DragoonCommand::GetListener { sender } => {
+            DragoonCommand::GetListeners { sender } => {
                 info!("getting listeners");
                 sender
                     .send(Ok(self

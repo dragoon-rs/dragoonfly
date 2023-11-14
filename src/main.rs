@@ -53,7 +53,7 @@ async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
     let mut cmd_sender = state.sender.lock().await;
 
     if let Err(e) = cmd_sender
-        .send(DragoonCommand::GetListener { sender })
+        .send(DragoonCommand::GetListeners { sender })
         .await
     {
         error!("Cannot send command GetListener: {:?}", e);
