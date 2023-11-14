@@ -16,6 +16,8 @@ use tracing::{error, info};
 
 use crate::dragoon_network::{DragoonCommand, DragoonNetwork};
 
+const IP_PORT: &str = "127.0.0.1:3000";
+
 async fn listen(Path(multiaddr): Path<String>, mut cmd_sender: Sender<DragoonCommand>) {
     let (sender, receiver) = oneshot::channel();
 
@@ -91,7 +93,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
         .route("/get-peer-id", get(move || get_peer_id(cmd_sender_3)));
 
     let http_server =
-        axum::Server::bind(&"127.0.0.1:3000".parse().unwrap()).serve(app.into_make_service());
+        axum::Server::bind(&IP_PORT.parse().unwrap()).serve(app.into_make_service());
     tokio::spawn(http_server);
 
     let kp = get_keypair(1);
