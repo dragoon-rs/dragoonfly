@@ -1,11 +1,8 @@
-use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
-use libp2p::futures::channel::{mpsc, oneshot};
+use libp2p::futures::channel::mpsc;
 use libp2p::futures::StreamExt;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
 use libp2p_core::Multiaddr;
-use libp2p_core::PeerId;
-use libp2p_core::transport::ListenerId;
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
@@ -13,6 +10,9 @@ use libp2p_swarm::{NetworkBehaviour, Swarm};
 use std::error::Error;
 use std::iter;
 use tracing::info;
+
+use crate::commands::DragoonCommand;
+use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
 
 pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
     let peer_id = id_keys.public().to_peer_id();
@@ -56,20 +56,6 @@ impl From<KademliaEvent> for DragoonEvent {
     }
 }
 
-#[derive(Debug)]
-pub enum DragoonCommand {
-    Listen {
-        multiaddr: String,
-        sender: oneshot::Sender<Result<ListenerId, Box<dyn Error + Send>>>,
-    },
-    GetListeners {
-        sender: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn Error + Send>>>,
-    },
-    GetPeerId {
-        sender: oneshot::Sender<Result<PeerId, Box<dyn Error + Send>>>,
-    },
-}
-
 pub struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
@@ -103,10 +89,13 @@ impl DragoonNetwork {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
                 info!("listening on {}", multiaddr);
-                let listener_id = self.swarm
+                let listener_id = self
+                    .swarm
                     .listen_on(multiaddr.parse().unwrap())
                     .expect(&format!("could not listen on {}", multiaddr));
-                sender.send(Ok(listener_id)).expect("could not send listener ID");
+                sender
+                    .send(Ok(listener_id))
+                    .expect("could not send listener ID");
             }
             DragoonCommand::GetListeners { sender } => {
                 info!("getting listeners");
