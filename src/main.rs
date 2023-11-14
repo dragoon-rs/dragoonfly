@@ -15,21 +15,17 @@ use tracing::{error, info};
 
 use crate::dragoon_network::{DragoonCommand, DragoonNetwork};
 
-async fn toto(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand>) {
-    info!("toto user id {}", user_id);
+async fn listen(Path(multiaddr): Path<String>, mut cmd_sender: Sender<DragoonCommand>) {
     let (sender, receiver) = oneshot::channel();
 
     if let Err(e) = cmd_sender
-        .send(DragoonCommand::DragoonTest {
-            file_name: "coucou".to_string(),
-            sender,
-        })
+        .send(DragoonCommand::Listen { multiaddr, sender })
         .await
     {
-        error!("Cannot send Command DragoonTest: {:?}", e);
+        error!("Cannot send command Listen: {:?}", e);
     }
     if let Err(e) = receiver.await {
-        error!("Cannot receive a return from Command DragoonTest: {:?}", e);
+        error!("Cannot receive a return from command Listen: {:?}", e);
     }
 }
 
@@ -39,7 +35,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
 
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);
 
-    let app = Router::new().route("/toto/:id", get(move |path| toto(path, cmd_sender)));
+    let app = Router::new().route("/listen/:addr", get(move |addr| listen(addr, cmd_sender)));
 
     let http_server =
         axum::Server::bind(&"127.0.0.1:3000".parse().unwrap()).serve(app.into_make_service());

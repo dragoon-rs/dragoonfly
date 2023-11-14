@@ -55,8 +55,8 @@ impl From<KademliaEvent> for DragoonEvent {
 
 #[derive(Debug)]
 pub enum DragoonCommand {
-    DragoonTest {
-        file_name: String,
+    Listen {
+        multiaddr: String,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
 }
@@ -79,9 +79,6 @@ impl DragoonNetwork {
 
     pub async fn run(mut self) {
         info!("Starting Dragoon Network");
-        self.swarm
-            .listen_on("/ip4/127.0.0.1/tcp/31000".parse().unwrap())
-            .expect("Listening not to fail.");
         loop {
             futures::select! {
                 e = self.swarm.next() => info!("{:?}",e),
@@ -95,8 +92,11 @@ impl DragoonNetwork {
 
     async fn handle_command(&mut self, cmd: DragoonCommand) {
         match cmd {
-            DragoonCommand::DragoonTest { file_name, sender } => {
-                info!(file_name);
+            DragoonCommand::Listen { multiaddr, sender } => {
+                info!("listening on {}", multiaddr);
+                self.swarm
+                    .listen_on(multiaddr.parse().unwrap())
+                    .expect(&format!("could not listen on {}", multiaddr));
                 sender.send(Ok(())).expect("TODO: panic message");
             }
         }
