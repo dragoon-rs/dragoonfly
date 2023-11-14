@@ -8,9 +8,8 @@ use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::sync::Arc;
-use thiserror::Error;
 use tracing::error;
 
 use crate::app::AppState;
@@ -44,19 +43,6 @@ pub enum DragoonCommand {
     GetNetworkInfo {
         sender: oneshot::Sender<Result<NetworkInfo, Box<dyn Error + Send>>>,
     },
-}
-
-#[derive(Clone, Error, PartialEq)]
-pub enum DragoonError {
-    #[error("Bad listener given")]
-    BadListener,
-}
-
-impl Debug for DragoonError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self)?;
-        Ok(())
-    }
 }
 
 pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) -> Response {

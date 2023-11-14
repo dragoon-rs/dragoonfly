@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod error;
 mod dragoon_network;
 mod dragoon_protocol;
 
