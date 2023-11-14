@@ -36,7 +36,7 @@ export def get-listeners []: nothing -> list<string> {
     "get-listeners" | run-command
 }
 
-# get the list of currently connected listeners
-export def get-peer-id []: nothing -> list<string> {
+# get the peer ID of the server in base 58
+export def get-peer-id []: nothing -> string {
     "get-peer-id" | run-command
 }
