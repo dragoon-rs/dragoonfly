@@ -38,3 +38,8 @@ export def get-listeners []: nothing -> list<string> {
 export def get-peer-id []: nothing -> string {
     "get-peer-id" | run-command
 }
+
+# get some information about the network
+export def get-network-info []: nothing -> record<peers: int, pending: int, connections: int, established: int, pending_incoming: int, pending_outgoing: int, established_incoming: int, established_outgoing: int> {
+    "get-network-info" | run-command
+}

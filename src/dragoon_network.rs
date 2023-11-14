@@ -114,6 +114,12 @@ impl DragoonNetwork {
                     .send(Ok(*self.swarm.local_peer_id()))
                     .expect("could not send peer ID");
             }
+            DragoonCommand::GetNetworkInfo { sender } => {
+                info!("getting network info");
+                sender
+                    .send(Ok(self.swarm.network_info()))
+                    .expect("could not send network info");
+            }
         }
     }
 }
