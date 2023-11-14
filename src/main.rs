@@ -19,12 +19,14 @@ async fn toto(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand
     info!("toto user id {}", user_id);
     let (sender, receiver) = oneshot::channel();
 
-    if let Err(e) = cmd_sender.send(DragoonCommand::DragoonTest {
+    if let Err(e) = cmd_sender
+        .send(DragoonCommand::DragoonTest {
             file_name: "coucou".to_string(),
             sender,
         })
-        .await {
-        error!("Cannot send Command DragoonTest: {:?}",e);
+        .await
+    {
+        error!("Cannot send Command DragoonTest: {:?}", e);
     }
     if let Err(e) = receiver.await {
         error!("Cannot receive a return from Command DragoonTest: {:?}", e);
@@ -35,11 +37,14 @@ async fn tata(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand
     info!("tata user id {}", user_id);
     let (sender, receiver) = oneshot::channel();
 
-    if cmd_sender.send(DragoonCommand::DragoonTest {
-        file_name: "coucou".to_string(),
-        sender,
-    })
-        .await.is_err() {
+    if cmd_sender
+        .send(DragoonCommand::DragoonTest {
+            file_name: "coucou".to_string(),
+            sender,
+        })
+        .await
+        .is_err()
+    {
         error!("Cannot send Command DragoonTest");
     }
     if receiver.await.is_err() {
