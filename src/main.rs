@@ -67,9 +67,9 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
 
     let swarm = dragoon_network::create_swarm(kp).await?;
     let network = DragoonNetwork::new(swarm, cmd_receiver);
-    let shutdown = signal::ctrl_c();
     tokio::spawn(network.run());
 
+    let shutdown = signal::ctrl_c();
     tokio::select! {
         _ = shutdown => {
             info!("shutdown Dragoon node");
