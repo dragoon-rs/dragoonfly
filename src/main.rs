@@ -20,7 +20,7 @@ use crate::dragoon_network::{DragoonCommand, DragoonNetwork};
 
 const IP_PORT: &str = "127.0.0.1:3000";
 
-async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) {
+async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;
@@ -31,8 +31,19 @@ async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>
     {
         error!("Cannot send command Listen: {:?}", e);
     }
-    if let Err(e) = receiver.await {
-        error!("Cannot receive a return from command Listen: {:?}", e);
+
+    match receiver.await {
+        Err(e) => {
+            error!("Cannot receive a return from command Listen: {:?}", e);
+            Json("").into_response()
+        }
+        Ok(res) => match res {
+            Err(e) => {
+                error!("Listen returned an error: {:?}", e);
+                Json("").into_response()
+            }
+            Ok(listener_id) => Json(format!("{:?}", listener_id)).into_response(),
+        },
     }
 }
 

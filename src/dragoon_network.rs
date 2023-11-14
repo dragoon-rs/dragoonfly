@@ -5,6 +5,7 @@ use libp2p::request_response;
 use libp2p_core::identity::Keypair;
 use libp2p_core::Multiaddr;
 use libp2p_core::PeerId;
+use libp2p_core::transport::ListenerId;
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
@@ -59,7 +60,7 @@ impl From<KademliaEvent> for DragoonEvent {
 pub enum DragoonCommand {
     Listen {
         multiaddr: String,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<ListenerId, Box<dyn Error + Send>>>,
     },
     GetListener {
         sender: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn Error + Send>>>,
@@ -102,10 +103,10 @@ impl DragoonNetwork {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
                 info!("listening on {}", multiaddr);
-                self.swarm
+                let listener_id = self.swarm
                     .listen_on(multiaddr.parse().unwrap())
                     .expect(&format!("could not listen on {}", multiaddr));
-                sender.send(Ok(())).expect("could not return from listen");
+                sender.send(Ok(listener_id)).expect("could not send listener ID");
             }
             DragoonCommand::GetListener { sender } => {
                 info!("getting listeners");

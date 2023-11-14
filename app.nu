@@ -23,12 +23,10 @@ def run-command []: string -> any {
 #     > app listen "/ip4/127.0.0.1/tcp/31000"
 export def listen [
     multiaddr: string, # the multi-address to listen to
-]: nothing -> nothing {
+]: nothing -> string {
     let multiaddr = $multiaddr | str replace --all '/' '%2F'
 
-    $"listen/($multiaddr)" | run-command
-
-    null
+    $"listen/($multiaddr)" | run-command | parse "ListenerId({id})" | into record | get id
 }
 
 # get the list of currently connected listeners
