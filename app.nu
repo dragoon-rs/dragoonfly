@@ -13,7 +13,7 @@ const DEFAULT_URL = {
 
 def run-command []: string -> any {
     let command = $in
-    $DEFAULT_URL | insert path ('/' + $command) | url join | http get $in
+    $DEFAULT_URL | insert path $command | url join | http get $in
 }
 
 # start to listen on a multiaddr
