@@ -13,6 +13,20 @@ use tracing::error;
 
 use crate::app::AppState;
 
+// Potential other commands:
+// - dial
+//
+// - external_addresses
+// - add_external_address
+// - remove_external_address
+//
+// - ban_peer_id
+// - unban_peer_id
+// - disconnect_peer_id
+//
+// - connected_peers
+//
+// - behaviour
 #[derive(Debug)]
 pub enum DragoonCommand {
     Listen {
