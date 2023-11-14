@@ -51,10 +51,6 @@ async fn tata(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand
 pub async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
-    let kp = get_keypair(1);
-    let id = kp.public().to_peer_id();
-    info!("Peer id: {}", id);
-
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);
 
     let cmd_sender2 = cmd_sender.clone();
@@ -65,6 +61,9 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
     let http_server =
         axum::Server::bind(&"127.0.0.1:3000".parse().unwrap()).serve(app.into_make_service());
     tokio::spawn(http_server);
+
+    let kp = get_keypair(1);
+    info!("Peer id: {}", kp.public().to_peer_id());
 
     let swarm = dragoon_network::create_swarm(kp).await?;
     let network = DragoonNetwork::new(swarm, cmd_receiver);
