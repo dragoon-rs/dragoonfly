@@ -2,11 +2,13 @@ use libp2p::futures::channel::mpsc;
 use libp2p::futures::StreamExt;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
+use libp2p_core::transport::ListenerId;
 use libp2p_core::Multiaddr;
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
 use libp2p_swarm::{NetworkBehaviour, Swarm};
+use std::collections::HashMap;
 use std::error::Error;
 use std::iter;
 use tracing::info;
@@ -59,6 +61,7 @@ impl From<KademliaEvent> for DragoonEvent {
 pub struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
+    listeners: HashMap<u64, ListenerId>,
 }
 
 impl DragoonNetwork {
@@ -69,6 +72,7 @@ impl DragoonNetwork {
         Self {
             swarm,
             command_receiver,
+            listeners: HashMap::new(),
         }
     }
 
@@ -89,10 +93,23 @@ impl DragoonNetwork {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
                 info!("listening on {}", multiaddr);
+
                 let listener_id = self
                     .swarm
                     .listen_on(multiaddr.parse().unwrap())
                     .expect(&format!("could not listen on {}", multiaddr));
+
+                let id = regex::Regex::new(r"ListenerId\((\d+)\)")
+                    .unwrap()
+                    .captures(&format!("{:?}", listener_id))
+                    .unwrap()
+                    .get(1)
+                    .unwrap()
+                    .as_str()
+                    .parse::<u64>()
+                    .unwrap();
+                self.listeners.insert(id, listener_id);
+
                 sender
                     .send(Ok(listener_id))
                     .expect("could not send listener ID");
