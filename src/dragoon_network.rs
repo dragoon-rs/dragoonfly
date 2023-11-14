@@ -97,7 +97,7 @@ impl DragoonNetwork {
                 self.swarm
                     .listen_on(multiaddr.parse().unwrap())
                     .expect(&format!("could not listen on {}", multiaddr));
-                sender.send(Ok(())).expect("TODO: panic message");
+                sender.send(Ok(())).expect("could not return from listen");
             }
         }
     }
