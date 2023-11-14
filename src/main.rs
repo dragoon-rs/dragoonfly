@@ -10,22 +10,26 @@ use futures::channel::mpsc::Sender;
 use futures::channel::{mpsc, oneshot};
 use futures::SinkExt;
 use std::error::Error;
+use futures::future::err;
 use tokio::signal;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::dragoon_network::{DragoonCommand, DragoonNetwork};
 
 async fn toto(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand>) {
     info!("user id {}", user_id);
     let (sender, receiver) = oneshot::channel();
-    cmd_sender
-        .send(DragoonCommand::DragoonTest {
+
+    if cmd_sender.send(DragoonCommand::DragoonTest {
             file_name: "coucou".to_string(),
             sender,
         })
-        .await
-        .expect("Command reveiver not to be dropped");
-    receiver.await.expect("Sender not to be dropped").unwrap();
+        .await.is_err() {
+        error!("Cannot send Command DragoonTest");
+    }
+    if receiver.await.is_err() {
+        error!("Cannot receive a return from Command DragoonTest");
+    }
 }
 
 #[tokio::main]
