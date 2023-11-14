@@ -33,35 +33,13 @@ async fn toto(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand
     }
 }
 
-async fn tata(Path(user_id): Path<String>, mut cmd_sender: Sender<DragoonCommand>) {
-    info!("tata user id {}", user_id);
-    let (sender, receiver) = oneshot::channel();
-
-    if cmd_sender
-        .send(DragoonCommand::DragoonTest {
-            file_name: "coucou".to_string(),
-            sender,
-        })
-        .await
-        .is_err()
-    {
-        error!("Cannot send Command DragoonTest");
-    }
-    if receiver.await.is_err() {
-        error!("Cannot receive a return from Command DragoonTest");
-    }
-}
-
 #[tokio::main]
 pub async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);
 
-    let cmd_sender2 = cmd_sender.clone();
-    let app = Router::new()
-        .route("/toto/:id", get(move |path| toto(path, cmd_sender)))
-        .route("/tata/:id", get(move |path2| tata(path2, cmd_sender2)));
+    let app = Router::new().route("/toto/:id", get(move |path| toto(path, cmd_sender)));
 
     let http_server =
         axum::Server::bind(&"127.0.0.1:3000".parse().unwrap()).serve(app.into_make_service());
