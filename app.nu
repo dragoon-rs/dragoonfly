@@ -26,7 +26,14 @@ export def listen [
 ]: nothing -> string {
     let multiaddr = $multiaddr | str replace --all '/' '%2F'
 
-    $"listen/($multiaddr)" | run-command | parse "ListenerId({id})" | into record | get id
+    let res = $"listen/($multiaddr)" | run-command | parse "ListenerId({id})" | into record
+    if $res.id? == null {
+        error make --unspanned {
+            msg: "could not create listener"
+        }
+    }
+
+    $res.id
 }
 
 # get the list of currently connected listeners
@@ -42,4 +49,15 @@ export def get-peer-id []: nothing -> string {
 # get some information about the network
 export def get-network-info []: nothing -> record<peers: int, pending: int, connections: int, established: int, pending_incoming: int, pending_outgoing: int, established_incoming: int, established_outgoing: int> {
     "get-network-info" | run-command
+}
+
+# remove a listener from it's ID
+#
+# Examples
+#     remove a listener directly
+#     > app remove-listener (app listen "/ip4/127.0.0.1/tcp/31200")
+export def remove-listener [
+    listener_id: string # the idea of the listener, namely the one given by `listen`
+]: nothing -> bool {
+    $"remove-listener/($listener_id)" | run-command
 }
