@@ -29,13 +29,32 @@ async fn listen(Path(multiaddr): Path<String>, mut cmd_sender: Sender<DragoonCom
     }
 }
 
+async fn get_listeners(mut cmd_sender: Sender<DragoonCommand>) {
+    let (sender, receiver) = oneshot::channel();
+
+    if let Err(e) = cmd_sender
+        .send(DragoonCommand::GetListener { sender })
+        .await
+    {
+        error!("Cannot send command GetListener: {:?}", e);
+    }
+
+    match receiver.await {
+        Err(e) => error!("Cannot receive a return from command GetListener: {:?}", e),
+        Ok(listeners) => println!("{:?}", listeners),
+    }
+}
+
 #[tokio::main]
 pub async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);
 
-    let app = Router::new().route("/listen/:addr", get(move |addr| listen(addr, cmd_sender)));
+    let cmd_sender_2 = cmd_sender.clone();
+    let app = Router::new()
+        .route("/listen/:addr", get(move |addr| listen(addr, cmd_sender)))
+        .route("/get-listeners", get(move || get_listeners(cmd_sender_2)));
 
     let http_server =
         axum::Server::bind(&"127.0.0.1:3000".parse().unwrap()).serve(app.into_make_service());

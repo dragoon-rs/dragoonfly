@@ -3,6 +3,7 @@ use libp2p::futures::channel::{mpsc, oneshot};
 use libp2p::futures::StreamExt;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
+use libp2p_core::Multiaddr;
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
@@ -59,6 +60,9 @@ pub enum DragoonCommand {
         multiaddr: String,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
+    GetListener {
+        sender: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn Error + Send>>>,
+    },
 }
 
 pub struct DragoonNetwork {
@@ -98,6 +102,17 @@ impl DragoonNetwork {
                     .listen_on(multiaddr.parse().unwrap())
                     .expect(&format!("could not listen on {}", multiaddr));
                 sender.send(Ok(())).expect("could not return from listen");
+            }
+            DragoonCommand::GetListener { sender } => {
+                info!("getting listeners");
+                sender
+                    .send(Ok(self
+                        .swarm
+                        .listeners()
+                        .into_iter()
+                        .cloned()
+                        .collect::<Vec<Multiaddr>>()))
+                    .expect("could not send list of listeners");
             }
         }
     }
