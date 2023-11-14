@@ -137,6 +137,17 @@ impl DragoonNetwork {
                     .send(Ok(self.swarm.network_info()))
                     .expect("could not send network info");
             }
+            DragoonCommand::RemoveListener {
+                listener_id,
+                sender,
+            } => {
+                info!("removing listener");
+                sender
+                    .send(Ok(self
+                        .swarm
+                        .remove_listener(*self.listeners.get(&listener_id).unwrap())))
+                    .expect("could not send network info");
+            }
         }
     }
 }

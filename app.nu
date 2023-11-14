@@ -43,3 +43,14 @@ export def get-peer-id []: nothing -> string {
 export def get-network-info []: nothing -> record<peers: int, pending: int, connections: int, established: int, pending_incoming: int, pending_outgoing: int, established_incoming: int, established_outgoing: int> {
     "get-network-info" | run-command
 }
+
+# remove a listener from it's ID
+#
+# Examples
+#     remove a listener directly
+#     > app remove-listener (app listen "/ip4/127.0.0.1/tcp/31200")
+export def remove-listener [
+    listener_id: string # the idea of the listener, namely the one given by `listen`
+]: nothing -> bool {
+    $"remove-listener/($listener_id)" | run-command
+}

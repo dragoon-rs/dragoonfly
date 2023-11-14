@@ -42,6 +42,10 @@ pub enum DragoonCommand {
     GetNetworkInfo {
         sender: oneshot::Sender<Result<NetworkInfo, Box<dyn Error + Send>>>,
     },
+    RemoveListener {
+        listener_id: u64,
+        sender: oneshot::Sender<Result<bool, Box<dyn Error + Send>>>,
+    },
 }
 
 pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) -> Response {
@@ -173,6 +177,42 @@ pub async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
                 })
             }
             .into_response(),
+        },
+    }
+}
+
+pub async fn remove_listener(
+    Path(listener_id): Path<u64>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (sender, receiver) = oneshot::channel();
+
+    let mut cmd_sender = state.sender.lock().await;
+
+    if let Err(e) = cmd_sender
+        .send(DragoonCommand::RemoveListener {
+            listener_id,
+            sender,
+        })
+        .await
+    {
+        error!("Cannot send command RemoveListener: {:?}", e);
+    }
+
+    match receiver.await {
+        Err(e) => {
+            error!(
+                "Cannot receive a return from command RemoveListener: {:?}",
+                e
+            );
+            Json("").into_response()
+        }
+        Ok(res) => match res {
+            Err(e) => {
+                error!("RemoveListener returned an error: {:?}", e);
+                Json("").into_response()
+            }
+            Ok(good) => Json(good).into_response(),
         },
     }
 }

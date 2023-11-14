@@ -28,6 +28,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
         .route("/get-listeners", get(commands::get_listeners))
         .route("/get-peer-id", get(commands::get_peer_id))
         .route("/get-network-info", get(commands::get_network_info))
+        .route("/remove-listener/:id", get(commands::remove_listener))
         .with_state(Arc::new(app::AppState::new(cmd_sender)));
 
     let http_server = axum::Server::bind(&IP_PORT.parse().unwrap()).serve(app.into_make_service());
