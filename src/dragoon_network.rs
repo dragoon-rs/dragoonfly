@@ -4,6 +4,7 @@ use libp2p::futures::StreamExt;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
 use libp2p_core::Multiaddr;
+use libp2p_core::PeerId;
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
@@ -63,6 +64,9 @@ pub enum DragoonCommand {
     GetListener {
         sender: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn Error + Send>>>,
     },
+    GetPeerId {
+        sender: oneshot::Sender<Result<PeerId, Box<dyn Error + Send>>>,
+    },
 }
 
 pub struct DragoonNetwork {
@@ -113,6 +117,12 @@ impl DragoonNetwork {
                         .cloned()
                         .collect::<Vec<Multiaddr>>()))
                     .expect("could not send list of listeners");
+            }
+            DragoonCommand::GetPeerId { sender } => {
+                info!("getting peer ID");
+                sender
+                    .send(Ok(*self.swarm.local_peer_id()))
+                    .expect("could not send peer ID");
             }
         }
     }

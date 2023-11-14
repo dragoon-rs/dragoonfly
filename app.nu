@@ -48,3 +48,19 @@ export def get-listeners [
 
     $url | url join | http get $in
 }
+
+# get the list of currently connected listeners
+export def get-peer-id [
+    --ip: string = $DEFAULT_IP, # the IP address of the server
+    --port: int = $DEFAULT_PORT, # the port to connect to the server
+    --proto: string = $DEFAULT_PROTO # the protocol to connect to the server
+]: nothing -> list<string> {
+    let url = {
+        scheme: $proto,
+        host: $ip,
+        port: $port,
+        path: $"/get-peer-id",
+    }
+
+    $url | url join | http get $in
+}
