@@ -46,5 +46,5 @@ export def get-listeners [
         path: $"/get-listeners",
     }
 
-    $url | url join | http get $in | lines
+    $url | url join | http get $in
 }

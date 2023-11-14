@@ -4,6 +4,7 @@ mod dragoon_protocol;
 use libp2p_core::identity::{ed25519, Keypair};
 
 use axum::extract::Path;
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
 use futures::channel::mpsc::Sender;
@@ -29,7 +30,7 @@ async fn listen(Path(multiaddr): Path<String>, mut cmd_sender: Sender<DragoonCom
     }
 }
 
-async fn get_listeners(mut cmd_sender: Sender<DragoonCommand>) {
+async fn get_listeners(mut cmd_sender: Sender<DragoonCommand>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     if let Err(e) = cmd_sender
@@ -40,8 +41,17 @@ async fn get_listeners(mut cmd_sender: Sender<DragoonCommand>) {
     }
 
     match receiver.await {
-        Err(e) => error!("Cannot receive a return from command GetListener: {:?}", e),
-        Ok(listeners) => println!("{:?}", listeners),
+        Err(e) => {
+            error!("Cannot receive a return from command GetListener: {:?}", e);
+            Json("").into_response()
+        }
+        Ok(res) => match res {
+            Err(e) => {
+                error!("GetListener returned an error: {:?}", e);
+                Json("").into_response()
+            }
+            Ok(listeners) => Json(listeners).into_response(),
+        },
     }
 }
 
