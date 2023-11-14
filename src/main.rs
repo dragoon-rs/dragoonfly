@@ -10,7 +10,6 @@ use futures::channel::mpsc::Sender;
 use futures::channel::{mpsc, oneshot};
 use futures::SinkExt;
 use std::error::Error;
-use futures::future::err;
 use tokio::signal;
 use tracing::{error, info};
 
