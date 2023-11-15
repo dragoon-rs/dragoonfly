@@ -54,23 +54,33 @@ pub(crate) enum DragoonCommand {
     },
 }
 
+impl std::fmt::Display for DragoonCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            DragoonCommand::Listen { .. } => write!(f, "listen"),
+            DragoonCommand::GetListeners { .. } => write!(f, "get-listener"),
+            DragoonCommand::GetPeerId { .. } => write!(f, "get-peer-id"),
+            DragoonCommand::GetNetworkInfo { .. } => write!(f, "get-network-info"),
+            DragoonCommand::RemoveListener { .. } => write!(f, "remove-listener"),
+            DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
+        }
+    }
+}
+
 pub(crate) async fn listen(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let (sender, receiver) = oneshot::channel();
 
-    send_command(
-        DragoonCommand::Listen { multiaddr, sender },
-        "listen",
-        state,
-    )
-    .await;
+    let cmd = DragoonCommand::Listen { multiaddr, sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
 
     match receiver.await {
-        Err(e) => handle_canceled(e, "listen"),
+        Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
-            Err(e) => handle_dragoon_error(e, "listen"),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(listener_id) => (StatusCode::OK, Json(format!("{:?}", listener_id))).into_response(),
         },
     }
@@ -79,17 +89,14 @@ pub(crate) async fn listen(
 pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
-    send_command(
-        DragoonCommand::GetListeners { sender },
-        "get-listeners",
-        state,
-    )
-    .await;
+    let cmd = DragoonCommand::GetListeners { sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
 
     match receiver.await {
-        Err(e) => handle_canceled(e, "get-listeners"),
+        Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
-            Err(e) => handle_dragoon_error(e, "get-listeners"),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(listeners) => Json(listeners).into_response(),
         },
     }
@@ -98,12 +105,14 @@ pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Respons
 pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
-    send_command(DragoonCommand::GetPeerId { sender }, "get-peer-id", state).await;
+    let cmd = DragoonCommand::GetPeerId { sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
 
     match receiver.await {
-        Err(e) => handle_canceled(e, "get-peer-id"),
+        Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
-            Err(e) => handle_dragoon_error(e, "get-peer-id"),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(peer_id) => Json(peer_id.to_base58()).into_response(),
         },
     }
@@ -124,17 +133,14 @@ struct SerNetworkInfo {
 pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
-    send_command(
-        DragoonCommand::GetNetworkInfo { sender },
-        "get-network-info",
-        state,
-    )
-    .await;
+    let cmd = DragoonCommand::GetNetworkInfo { sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
 
     match receiver.await {
-        Err(e) => handle_canceled(e, "get-network-info"),
+        Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
-            Err(e) => handle_dragoon_error(e, "get-network-info"),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(network_info) => {
                 let connections = network_info.connection_counters();
                 Json(SerNetworkInfo {
@@ -159,20 +165,17 @@ pub(crate) async fn remove_listener(
 ) -> Response {
     let (sender, receiver) = oneshot::channel();
 
-    send_command(
-        DragoonCommand::RemoveListener {
-            listener_id,
-            sender,
-        },
-        "remove-listener",
-        state,
-    )
-    .await;
+    let cmd = DragoonCommand::RemoveListener {
+        listener_id,
+        sender,
+    };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
 
     match receiver.await {
-        Err(e) => handle_canceled(e, "remove-listener"),
+        Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
-            Err(e) => handle_dragoon_error(e, "remove-listener"),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(good) => Json(good).into_response(),
         },
     }
@@ -181,17 +184,14 @@ pub(crate) async fn remove_listener(
 pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
-    send_command(
-        DragoonCommand::GetConnectedPeers { sender },
-        "get-connected-peers",
-        state,
-    )
-    .await;
+    let cmd = DragoonCommand::GetConnectedPeers { sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
 
     match receiver.await {
-        Err(e) => handle_canceled(e, "get-connected-peers"),
+        Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
-            Err(e) => handle_dragoon_error(e, "get-listener"),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(connected_peers) => Json(
                 connected_peers
                     .iter()
@@ -220,15 +220,13 @@ fn handle_canceled(err: Canceled, command: &str) -> Response {
     DragoonError::UnexpectedError.into_response()
 }
 
-async fn send_command(
-    dragoon_command: DragoonCommand,
-    command: &str,
-    state: Arc<AppState>,
-) -> Option<Response> {
+async fn send_command(command: DragoonCommand, state: Arc<AppState>) -> Option<Response> {
     let mut cmd_sender = state.sender.lock().await;
 
-    if let Err(e) = cmd_sender.send(dragoon_command).await {
-        error!("Cannot send command {}: {:?}", command, e);
+    let cmd_name = format!("{}", command);
+
+    if let Err(e) = cmd_sender.send(command).await {
+        error!("Cannot send command {}: {:?}", cmd_name, e);
         return Some(DragoonError::UnexpectedError.into_response());
     }
 
