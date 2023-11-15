@@ -8,10 +8,13 @@ use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::fmt::Debug;
 use std::sync::Arc;
+use axum::http::StatusCode;
 use tracing::error;
 
 use crate::app::AppState;
+use crate::error::DragoonError;
 
 // Potential other commands:
 // - dial
@@ -61,19 +64,26 @@ pub(crate) async fn listen(Path(multiaddr): Path<String>, State(state): State<Ar
         .await
     {
         error!("Cannot send command Listen: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
         Err(e) => {
             error!("Cannot receive a return from command Listen: {:?}", e);
-            Json("").into_response()
+            DragoonError::UnexpectedError.into_response()
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("Listen returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error)= e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command Listen");
+                    DragoonError::UnexpectedError.into_response()
+                }
             }
-            Ok(listener_id) => Json(format!("{:?}", listener_id)).into_response(),
+            Ok(listener_id) =>  {
+                (StatusCode::OK,Json(format!("{:?}", listener_id))).into_response()
+            },
         },
     }
 }

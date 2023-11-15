@@ -11,12 +11,15 @@ use libp2p_swarm::{NetworkBehaviour, Swarm};
 use std::collections::HashMap;
 use std::error::Error;
 use std::iter;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
 use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
+use crate::error::DragoonError::BadListener;
 
-pub(crate) async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
+pub(crate) async fn create_swarm(
+    id_keys: Keypair,
+) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
     let peer_id = id_keys.public().to_peer_id();
     let swarm = Swarm::with_threadpool_executor(
         libp2p::development_transport(id_keys).await?,
@@ -92,27 +95,36 @@ impl DragoonNetwork {
     async fn handle_command(&mut self, cmd: DragoonCommand) {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
-                info!("listening on {}", multiaddr);
+                if let Ok(addr) = multiaddr.parse() {
+                    if let Ok(listener_id) = self.swarm.listen_on(addr) {
+                        info!("listening on {}", multiaddr);
 
-                let listener_id = self
-                    .swarm
-                    .listen_on(multiaddr.parse().unwrap())
-                    .expect(&format!("could not listen on {}", multiaddr));
+                        let id = regex::Regex::new(r"ListenerId\((\d+)\)")
+                            .unwrap()
+                            .captures(&format!("{:?}", listener_id))
+                            .unwrap()
+                            .get(1)
+                            .unwrap()
+                            .as_str()
+                            .parse::<u64>()
+                            .unwrap();
+                        self.listeners.insert(id, listener_id);
 
-                let id = regex::Regex::new(r"ListenerId\((\d+)\)")
-                    .unwrap()
-                    .captures(&format!("{:?}", listener_id))
-                    .unwrap()
-                    .get(1)
-                    .unwrap()
-                    .as_str()
-                    .parse::<u64>()
-                    .unwrap();
-                self.listeners.insert(id, listener_id);
-
-                sender
-                    .send(Ok(listener_id))
-                    .expect("could not send listener ID");
+                        if sender.send(Ok(listener_id)).is_err() {
+                            error!("could not send listener ID");
+                        }
+                    } else {
+                        error!("cannot call swarm::listen_on");
+                        if sender.send(Err(Box::new(BadListener))).is_err() {
+                            error!("Cannot send result");
+                        }
+                    }
+                } else {
+                    error!("cannot parse addr {}", multiaddr);
+                    if sender.send(Err(Box::new(BadListener))).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
             }
             DragoonCommand::GetListeners { sender } => {
                 info!("getting listeners");
