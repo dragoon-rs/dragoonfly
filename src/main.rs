@@ -18,7 +18,7 @@ use crate::dragoon_network::DragoonNetwork;
 const IP_PORT: &str = "127.0.0.1:3000";
 
 #[tokio::main]
-pub async fn main() -> Result<(), Box<dyn Error>> {
+pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);

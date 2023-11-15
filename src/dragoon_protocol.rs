@@ -6,13 +6,13 @@ use libp2p::request_response;
 use std::io;
 
 #[derive(Debug, Clone)]
-pub struct DragoonProtocol();
+pub(crate) struct DragoonProtocol();
 #[derive(Clone)]
-pub struct DragoonCodec();
+pub(crate) struct DragoonCodec();
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileRequest(String);
+pub(crate) struct FileRequest(String);
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileResponse(Vec<u8>);
+pub(crate) struct FileResponse(Vec<u8>);
 
 impl ProtocolName for DragoonProtocol {
     fn protocol_name(&self) -> &[u8] {

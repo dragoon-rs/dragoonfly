@@ -16,7 +16,7 @@ use tracing::info;
 use crate::commands::DragoonCommand;
 use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
 
-pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
+pub(crate) async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
     let peer_id = id_keys.public().to_peer_id();
     let swarm = Swarm::with_threadpool_executor(
         libp2p::development_transport(id_keys).await?,
@@ -35,13 +35,13 @@ pub async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>, B
 
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "DragoonEvent")]
-pub struct DragoonBehaviour {
+pub(crate) struct DragoonBehaviour {
     request_response: request_response::Behaviour<DragoonCodec>,
     kademlia: Kademlia<MemoryStore>,
 }
 
 #[derive(Debug)]
-pub enum DragoonEvent {
+pub(crate) enum DragoonEvent {
     RequestResponse(request_response::Event<FileRequest, FileResponse>),
     Kademlia(KademliaEvent),
 }
@@ -58,7 +58,7 @@ impl From<KademliaEvent> for DragoonEvent {
     }
 }
 
-pub struct DragoonNetwork {
+pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,

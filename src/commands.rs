@@ -28,7 +28,7 @@ use crate::app::AppState;
 //
 // - behaviour
 #[derive(Debug)]
-pub enum DragoonCommand {
+pub(crate) enum DragoonCommand {
     Listen {
         multiaddr: String,
         sender: oneshot::Sender<Result<ListenerId, Box<dyn Error + Send>>>,
@@ -51,7 +51,7 @@ pub enum DragoonCommand {
     },
 }
 
-pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;
@@ -78,7 +78,7 @@ pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppSt
     }
 }
 
-pub async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;
@@ -105,7 +105,7 @@ pub async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-pub async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;
@@ -141,7 +141,7 @@ struct SerNetworkInfo {
     established_outgoing: u32,
 }
 
-pub async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;
@@ -184,7 +184,7 @@ pub async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-pub async fn remove_listener(
+pub(crate) async fn remove_listener(
     Path(listener_id): Path<u64>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -220,7 +220,7 @@ pub async fn remove_listener(
     }
 }
 
-pub async fn get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;

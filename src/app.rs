@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 
 use crate::commands::DragoonCommand;
 
-pub struct AppState {
+pub(crate) struct AppState {
     pub sender: Mutex<Sender<DragoonCommand>>,
 }
 
