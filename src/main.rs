@@ -1,8 +1,8 @@
 mod app;
 mod commands;
-mod error;
 mod dragoon_network;
 mod dragoon_protocol;
+mod error;
 
 use libp2p_core::identity::{ed25519, Keypair};
 
@@ -10,13 +10,12 @@ use axum::routing::get;
 use axum::Router;
 use futures::channel::mpsc;
 use std::error::Error;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
 use tracing::info;
 
 use crate::dragoon_network::DragoonNetwork;
-
-const IP_PORT: &str = "127.0.0.1:3000";
 
 #[tokio::main]
 pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
@@ -33,7 +32,15 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/get-connected-peers", get(commands::get_connected_peers))
         .with_state(Arc::new(app::AppState::new(cmd_sender)));
 
-    let http_server = axum::Server::bind(&IP_PORT.parse().unwrap()).serve(app.into_make_service());
+    let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {
+        ip_port
+    } else {
+        "127.0.0.1:3000".to_string()
+    }
+    .parse()
+    .unwrap();
+
+    let http_server = axum::Server::bind(&ip_port).serve(app.into_make_service());
     tokio::spawn(http_server);
 
     let kp = get_keypair(1);
