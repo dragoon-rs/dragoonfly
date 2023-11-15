@@ -15,7 +15,15 @@ const DEFAULT_URL = {
 
 def run-command []: string -> any {
     let command = $in
-    $DEFAULT_URL | insert path $command | url join | http get $in --allow-errors --full
+
+    let res = $DEFAULT_URL | insert path $command | url join | http get $in --allow-errors --full
+    if $res.status != $HTTP_OK {
+        error make --unspanned {
+            msg: $"($res.body) \(($res.status)\)"
+        }
+    }
+
+    $res.body
 }
 
 # start to listen on a multiaddr
@@ -28,14 +36,7 @@ export def listen [
 ]: nothing -> string {
     let multiaddr = $multiaddr | str replace --all '/' '%2F'
 
-    let res = $"listen/($multiaddr)" | run-command
-    if $res.status != $HTTP_OK {
-        error make --unspanned {
-            msg: $"($res.body) \(($res.status)\)"
-        }
-    }
-
-    $res.body | parse "ListenerId({id})" | into record | get id
+    $"listen/($multiaddr)" | run-command | parse "ListenerId({id})" | into record | get id
 }
 
 # get the list of currently connected listeners
