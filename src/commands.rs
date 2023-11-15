@@ -76,14 +76,7 @@ pub(crate) async fn listen(
             DragoonError::UnexpectedError.into_response()
         }
         Ok(res) => match res {
-            Err(e) => {
-                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
-                    dragoon_error.into_response()
-                } else {
-                    error!("cannot get return message from command Listen");
-                    DragoonError::UnexpectedError.into_response()
-                }
-            }
+            Err(e) => handle_dragoon_error(e, "listen"),
             Ok(listener_id) => (StatusCode::OK, Json(format!("{:?}", listener_id))).into_response(),
         },
     }
@@ -108,14 +101,7 @@ pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Respons
             return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
-            Err(e) => {
-                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
-                    dragoon_error.into_response()
-                } else {
-                    error!("cannot get return message from command GetListener");
-                    return DragoonError::UnexpectedError.into_response();
-                }
-            }
+            Err(e) => handle_dragoon_error(e, "get-listeners"),
             Ok(listeners) => Json(listeners).into_response(),
         },
     }
@@ -137,14 +123,7 @@ pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response 
             return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
-            Err(e) => {
-                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
-                    dragoon_error.into_response()
-                } else {
-                    error!("cannot get return message from command GetPeerId");
-                    return DragoonError::UnexpectedError.into_response();
-                }
-            }
+            Err(e) => handle_dragoon_error(e, "get-peer-id"),
             Ok(peer_id) => Json(peer_id.to_base58()).into_response(),
         },
     }
@@ -184,14 +163,7 @@ pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Resp
             return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
-            Err(e) => {
-                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
-                    dragoon_error.into_response()
-                } else {
-                    error!("cannot get return message from command GetNetworkInfo");
-                    return DragoonError::UnexpectedError.into_response();
-                }
-            }
+            Err(e) => handle_dragoon_error(e, "get-network-info"),
             Ok(network_info) => {
                 let connections = network_info.connection_counters();
                 Json(SerNetworkInfo {
@@ -238,14 +210,7 @@ pub(crate) async fn remove_listener(
             return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
-            Err(e) => {
-                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
-                    dragoon_error.into_response()
-                } else {
-                    error!("cannot get return message from command RemoveListener");
-                    return DragoonError::UnexpectedError.into_response();
-                }
-            }
+            Err(e) => handle_dragoon_error(e, "remove-listener"),
             Ok(good) => Json(good).into_response(),
         },
     }
@@ -273,14 +238,7 @@ pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> R
             return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
-            Err(e) => {
-                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
-                    dragoon_error.into_response()
-                } else {
-                    error!("cannot get return message from command GetConnectedPeers");
-                    return DragoonError::UnexpectedError.into_response();
-                }
-            }
+            Err(e) => handle_dragoon_error(e, "get-listener"),
             Ok(connected_peers) => Json(
                 connected_peers
                     .iter()
@@ -289,5 +247,14 @@ pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> R
             )
             .into_response(),
         },
+    }
+}
+
+fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {
+    if let Ok(dragoon_error) = err.downcast::<DragoonError>() {
+        dragoon_error.into_response()
+    } else {
+        error!("cannot get return message from command {}", command);
+        DragoonError::UnexpectedError.into_response()
     }
 }
