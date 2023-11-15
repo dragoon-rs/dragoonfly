@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tracing::error;
 
 use crate::app::AppState;
+use crate::error::DragoonError;
 
 // Potential other commands:
 // - dial
@@ -64,8 +65,12 @@ pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppSt
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("Listen returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error)= e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command Listen");
+                    Json("").into_response()
+                }
             }
             Ok(listener_id) => Json(format!("{:?}", listener_id)).into_response(),
         },

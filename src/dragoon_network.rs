@@ -89,16 +89,22 @@ impl DragoonNetwork {
     async fn handle_command(&mut self, cmd: DragoonCommand) {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
-                info!("listening on {}", multiaddr);
                 if let Ok(addr) = multiaddr.parse() {
-                    let listener_id = self
+                     if let Ok(listener_id) = self
                         .swarm
-                        .listen_on(addr)
-                        .expect(&format!("could not listen on {}", multiaddr));
-                    sender
-                        .send(Ok(listener_id))
-                        .expect("could not send listener ID");
+                        .listen_on(addr) {
+                            info!("listening on {}", multiaddr);
+                            if sender.send(Ok(listener_id)).is_err() {
+                                error!("could not send listener ID");
+                            }
+                        } else {
+                         error!("cannot call swarm::listen_on");
+                         if sender.send(Err(Box::new(BadListener))).is_err() {
+                             error!("Cannot send result");
+                         }
+                     }
                 } else {
+                    error!("cannot parse addr {}", multiaddr);
                     if sender.send(Err(Box::new(BadListener))).is_err() {
                         error!("Cannot send result");
                     }

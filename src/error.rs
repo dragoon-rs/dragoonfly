@@ -1,4 +1,8 @@
 use std::fmt::{Debug, Formatter};
+use axum::http::StatusCode;
+use axum::Json;
+use axum::response::{IntoResponse, Response};
+use serde_json::json;
 use thiserror::Error;
 
 #[derive(Clone, Error, PartialEq)]
@@ -11,5 +15,14 @@ impl Debug for DragoonError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", self)?;
         Ok(())
+    }
+}
+
+impl IntoResponse for DragoonError {
+    fn into_response(self) -> Response {
+        let (status, err_msg) = match self {
+            DragoonError::BadListener => (StatusCode::BAD_REQUEST, self.to_string())
+        };
+        (status, Json(json!({"error": err_msg}))).into_response()
     }
 }
