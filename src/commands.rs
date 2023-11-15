@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
+use axum::http::StatusCode;
+use serde_json::json;
 use tracing::error;
 
 use crate::app::AppState;
@@ -56,12 +58,13 @@ pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppSt
         .await
     {
         error!("Cannot send command Listen: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
         Err(e) => {
             error!("Cannot receive a return from command Listen: {:?}", e);
-            Json("").into_response()
+            DragoonError::UnexpectedError.into_response()
         }
         Ok(res) => match res {
             Err(e) => {
@@ -69,10 +72,13 @@ pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppSt
                     dragoon_error.into_response()
                 } else {
                     error!("cannot get return message from command Listen");
-                    Json("").into_response()
+                    DragoonError::UnexpectedError.into_response()
                 }
             }
-            Ok(listener_id) => Json(format!("{:?}", listener_id)).into_response(),
+            Ok(listener_id) =>  {
+                let str_id = format!("{:?}",listener_id);
+                (StatusCode::OK,Json(json!({"result":str_id}))).into_response()
+            },
         },
     }
 }

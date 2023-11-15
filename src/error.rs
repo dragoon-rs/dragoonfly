@@ -9,6 +9,8 @@ use thiserror::Error;
 pub enum DragoonError {
     #[error("Bad listener given")]
     BadListener,
+    #[error("unexpected error from Dragoon")]
+    UnexpectedError
 }
 
 impl Debug for DragoonError {
@@ -21,7 +23,8 @@ impl Debug for DragoonError {
 impl IntoResponse for DragoonError {
     fn into_response(self) -> Response {
         let (status, err_msg) = match self {
-            DragoonError::BadListener => (StatusCode::BAD_REQUEST, self.to_string())
+            DragoonError::UnexpectedError => (StatusCode::BAD_REQUEST, self.to_string()),
+            DragoonError::BadListener => (StatusCode::BAD_REQUEST, self.to_string()),
         };
         (status, Json(json!({"error": err_msg}))).into_response()
     }
