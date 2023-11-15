@@ -128,48 +128,64 @@ impl DragoonNetwork {
             }
             DragoonCommand::GetListeners { sender } => {
                 info!("getting listeners");
-                sender
-                    .send(Ok(self
-                        .swarm
-                        .listeners()
-                        .into_iter()
-                        .cloned()
-                        .collect::<Vec<Multiaddr>>()))
-                    .expect("could not send list of listeners");
+                let listeners = self
+                    .swarm
+                    .listeners()
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<Multiaddr>>();
+
+                if sender.send(Ok(listeners)).is_err() {
+                    error!("could not send list of listeners");
+                }
             }
             DragoonCommand::GetPeerId { sender } => {
                 info!("getting peer ID");
-                sender
-                    .send(Ok(*self.swarm.local_peer_id()))
-                    .expect("could not send peer ID");
+                let peer_id = *self.swarm.local_peer_id();
+
+                if sender.send(Ok(peer_id)).is_err() {
+                    error!("could not send peer ID");
+                }
             }
             DragoonCommand::GetNetworkInfo { sender } => {
                 info!("getting network info");
-                sender
-                    .send(Ok(self.swarm.network_info()))
-                    .expect("could not send network info");
+                let network_info = self.swarm.network_info();
+
+                if sender.send(Ok(network_info)).is_err() {
+                    error!("could not send network info");
+                }
             }
             DragoonCommand::RemoveListener {
                 listener_id,
                 sender,
             } => {
                 info!("removing listener");
-                sender
-                    .send(Ok(self
-                        .swarm
-                        .remove_listener(*self.listeners.get(&listener_id).unwrap())))
-                    .expect("could not send network info");
+
+                if let Some(listener) = self.listeners.get(&listener_id) {
+                    let res = self.swarm.remove_listener(*listener);
+
+                    if sender.send(Ok(res)).is_err() {
+                        error!("could not send remove listener");
+                    }
+                } else {
+                    error!("could not find listener");
+                    if sender.send(Err(Box::new(BadListener))).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
             }
             DragoonCommand::GetConnectedPeers { sender } => {
                 info!("getting list of connected peers");
-                sender
-                    .send(Ok(self
-                        .swarm
-                        .connected_peers()
-                        .into_iter()
-                        .cloned()
-                        .collect::<Vec<PeerId>>()))
-                    .expect("could not send list of connected peers");
+                let connected_peers = self
+                    .swarm
+                    .connected_peers()
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<PeerId>>();
+
+                if sender.send(Ok(connected_peers)).is_err() {
+                    error!("could not send list of connected peers");
+                }
             }
         }
     }
