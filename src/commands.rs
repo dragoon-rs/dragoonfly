@@ -24,6 +24,8 @@ use crate::app::AppState;
 // - unban_peer_id
 // - disconnect_peer_id
 //
+// - is_connected
+//
 // - behaviour
 #[derive(Debug)]
 pub enum DragoonCommand {
