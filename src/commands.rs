@@ -1,4 +1,5 @@
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot;
 use futures::SinkExt;
@@ -10,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
-use axum::http::StatusCode;
 use tracing::error;
 
 use crate::app::AppState;
@@ -54,7 +54,10 @@ pub(crate) enum DragoonCommand {
     },
 }
 
-pub(crate) async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn listen(
+    Path(multiaddr): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     let (sender, receiver) = oneshot::channel();
 
     let mut cmd_sender = state.sender.lock().await;
@@ -74,16 +77,14 @@ pub(crate) async fn listen(Path(multiaddr): Path<String>, State(state): State<Ar
         }
         Ok(res) => match res {
             Err(e) => {
-                if let Ok(dragoon_error)= e.downcast::<DragoonError>() {
+                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
                     dragoon_error.into_response()
                 } else {
                     error!("cannot get return message from command Listen");
                     DragoonError::UnexpectedError.into_response()
                 }
             }
-            Ok(listener_id) =>  {
-                (StatusCode::OK,Json(format!("{:?}", listener_id))).into_response()
-            },
+            Ok(listener_id) => (StatusCode::OK, Json(format!("{:?}", listener_id))).into_response(),
         },
     }
 }
@@ -98,17 +99,22 @@ pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Respons
         .await
     {
         error!("Cannot send command GetListener: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
         Err(e) => {
             error!("Cannot receive a return from command GetListener: {:?}", e);
-            Json("").into_response()
+            return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("GetListener returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command GetListener");
+                    return DragoonError::UnexpectedError.into_response();
+                }
             }
             Ok(listeners) => Json(listeners).into_response(),
         },
@@ -122,17 +128,22 @@ pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response 
 
     if let Err(e) = cmd_sender.send(DragoonCommand::GetPeerId { sender }).await {
         error!("Cannot send command GetPeerId: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
         Err(e) => {
             error!("Cannot receive a return from command GetPeerId: {:?}", e);
-            Json("").into_response()
+            return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("GetPeerId returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command GetPeerId");
+                    return DragoonError::UnexpectedError.into_response();
+                }
             }
             Ok(peer_id) => Json(peer_id.to_base58()).into_response(),
         },
@@ -161,6 +172,7 @@ pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Resp
         .await
     {
         error!("Cannot send command GetNetworkInfo: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
@@ -169,12 +181,16 @@ pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Resp
                 "Cannot receive a return from command GetNetworkInfo: {:?}",
                 e
             );
-            Json("").into_response()
+            return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("GetNetworkInfo returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command GetNetworkInfo");
+                    return DragoonError::UnexpectedError.into_response();
+                }
             }
             Ok(network_info) => {
                 let connections = network_info.connection_counters();
@@ -210,6 +226,7 @@ pub(crate) async fn remove_listener(
         .await
     {
         error!("Cannot send command RemoveListener: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
@@ -218,12 +235,16 @@ pub(crate) async fn remove_listener(
                 "Cannot receive a return from command RemoveListener: {:?}",
                 e
             );
-            Json("").into_response()
+            return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("RemoveListener returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command RemoveListener");
+                    return DragoonError::UnexpectedError.into_response();
+                }
             }
             Ok(good) => Json(good).into_response(),
         },
@@ -240,6 +261,7 @@ pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> R
         .await
     {
         error!("Cannot send command GetConnectedPeers: {:?}", e);
+        return DragoonError::UnexpectedError.into_response();
     }
 
     match receiver.await {
@@ -248,12 +270,16 @@ pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> R
                 "Cannot receive a return from command GetConnectedPeers: {:?}",
                 e
             );
-            Json("").into_response()
+            return DragoonError::UnexpectedError.into_response();
         }
         Ok(res) => match res {
             Err(e) => {
-                error!("GetConnectedPeers returned an error: {:?}", e);
-                Json("").into_response()
+                if let Ok(dragoon_error) = e.downcast::<DragoonError>() {
+                    dragoon_error.into_response()
+                } else {
+                    error!("cannot get return message from command GetConnectedPeers");
+                    return DragoonError::UnexpectedError.into_response();
+                }
             }
             Ok(connected_peers) => Json(
                 connected_peers
