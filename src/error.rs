@@ -2,7 +2,6 @@ use std::fmt::{Debug, Formatter};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
 use thiserror::Error;
 
 #[derive(Clone, Error, PartialEq)]
@@ -26,6 +25,6 @@ impl IntoResponse for DragoonError {
             DragoonError::UnexpectedError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             DragoonError::BadListener => (StatusCode::BAD_REQUEST, self.to_string()),
         };
-        (status, Json(json!({"error": err_msg}))).into_response()
+        (status, Json(format!("{}", err_msg))).into_response()
     }
 }

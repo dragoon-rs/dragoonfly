@@ -11,7 +11,6 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 use axum::http::StatusCode;
-use serde_json::json;
 use tracing::error;
 
 use crate::app::AppState;
@@ -76,8 +75,7 @@ pub async fn listen(Path(multiaddr): Path<String>, State(state): State<Arc<AppSt
                 }
             }
             Ok(listener_id) =>  {
-                let str_id = format!("{:?}",listener_id);
-                (StatusCode::OK,Json(json!({"result":str_id}))).into_response()
+                (StatusCode::OK,Json(format!("{:?}", listener_id))).into_response()
             },
         },
     }
