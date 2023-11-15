@@ -3,7 +3,7 @@ use libp2p::futures::StreamExt;
 use libp2p::request_response;
 use libp2p_core::identity::Keypair;
 use libp2p_core::transport::ListenerId;
-use libp2p_core::Multiaddr;
+use libp2p_core::{Multiaddr, PeerId};
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{Kademlia, KademliaEvent};
 use libp2p_request_response::ProtocolSupport;
@@ -147,6 +147,17 @@ impl DragoonNetwork {
                         .swarm
                         .remove_listener(*self.listeners.get(&listener_id).unwrap())))
                     .expect("could not send network info");
+            }
+            DragoonCommand::GetConnectedPeers { sender } => {
+                info!("getting list of connected peers");
+                sender
+                    .send(Ok(self
+                        .swarm
+                        .connected_peers()
+                        .into_iter()
+                        .cloned()
+                        .collect::<Vec<PeerId>>()))
+                    .expect("could not send list of connected peers");
             }
         }
     }

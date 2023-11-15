@@ -54,3 +54,8 @@ export def remove-listener [
 ]: nothing -> bool {
     $"remove-listener/($listener_id)" | run-command
 }
+
+# get the list of currently connected peers
+export def get-connected-peers []: nothing -> list<string> {
+    "get-connected-peers" | run-command
+}

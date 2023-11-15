@@ -24,8 +24,6 @@ use crate::app::AppState;
 // - unban_peer_id
 // - disconnect_peer_id
 //
-// - connected_peers
-//
 // - behaviour
 #[derive(Debug)]
 pub enum DragoonCommand {
@@ -45,6 +43,9 @@ pub enum DragoonCommand {
     RemoveListener {
         listener_id: u64,
         sender: oneshot::Sender<Result<bool, Box<dyn Error + Send>>>,
+    },
+    GetConnectedPeers {
+        sender: oneshot::Sender<Result<Vec<PeerId>, Box<dyn Error + Send>>>,
     },
 }
 
@@ -213,6 +214,42 @@ pub async fn remove_listener(
                 Json("").into_response()
             }
             Ok(good) => Json(good).into_response(),
+        },
+    }
+}
+
+pub async fn get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
+    let (sender, receiver) = oneshot::channel();
+
+    let mut cmd_sender = state.sender.lock().await;
+
+    if let Err(e) = cmd_sender
+        .send(DragoonCommand::GetConnectedPeers { sender })
+        .await
+    {
+        error!("Cannot send command GetConnectedPeers: {:?}", e);
+    }
+
+    match receiver.await {
+        Err(e) => {
+            error!(
+                "Cannot receive a return from command GetConnectedPeers: {:?}",
+                e
+            );
+            Json("").into_response()
+        }
+        Ok(res) => match res {
+            Err(e) => {
+                error!("GetConnectedPeers returned an error: {:?}", e);
+                Json("").into_response()
+            }
+            Ok(connected_peers) => Json(
+                connected_peers
+                    .iter()
+                    .map(|p| p.to_base58())
+                    .collect::<Vec<String>>(),
+            )
+            .into_response(),
         },
     }
 }
