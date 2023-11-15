@@ -5,6 +5,8 @@ export def main []: nothing -> nothing {
     null
 }
 
+const HTTP_OK = 200
+
 const DEFAULT_URL = {
     scheme: "http",
     host: "127.0.0.1",
@@ -13,7 +15,7 @@ const DEFAULT_URL = {
 
 def run-command []: string -> any {
     let command = $in
-    $DEFAULT_URL | insert path $command | url join | http get $in
+    $DEFAULT_URL | insert path $command | url join | http get $in --allow-errors --full
 }
 
 # start to listen on a multiaddr
@@ -26,14 +28,14 @@ export def listen [
 ]: nothing -> string {
     let multiaddr = $multiaddr | str replace --all '/' '%2F'
 
-    let res = $"listen/($multiaddr)" | run-command | parse "ListenerId({id})" | into record
-    if $res.id? == null {
+    let res = $"listen/($multiaddr)" | run-command
+    if $res.status != $HTTP_OK {
         error make --unspanned {
-            msg: "could not create listener"
+            msg: $"($res.body) \(($res.status)\)"
         }
     }
 
-    $res.id
+    $res.body | parse "ListenerId({id})" | into record | get id
 }
 
 # get the list of currently connected listeners
