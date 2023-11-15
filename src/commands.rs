@@ -97,7 +97,7 @@ pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Respons
         Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
             Err(e) => handle_dragoon_error(e, &cmd_name),
-            Ok(listeners) => Json(listeners).into_response(),
+            Ok(listeners) => (StatusCode::OK, Json(listeners)).into_response(),
         },
     }
 }
@@ -113,7 +113,7 @@ pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response 
         Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
             Err(e) => handle_dragoon_error(e, &cmd_name),
-            Ok(peer_id) => Json(peer_id.to_base58()).into_response(),
+            Ok(peer_id) => (StatusCode::OK, Json(peer_id.to_base58())).into_response(),
         },
     }
 }
@@ -143,18 +143,21 @@ pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Resp
             Err(e) => handle_dragoon_error(e, &cmd_name),
             Ok(network_info) => {
                 let connections = network_info.connection_counters();
-                Json(SerNetworkInfo {
-                    peers: network_info.num_peers(),
-                    pending: connections.num_pending(),
-                    connections: connections.num_connections(),
-                    established: connections.num_established(),
-                    pending_incoming: connections.num_pending_incoming(),
-                    pending_outgoing: connections.num_pending_outgoing(),
-                    established_incoming: connections.num_established_incoming(),
-                    established_outgoing: connections.num_established_outgoing(),
-                })
+                (
+                    StatusCode::OK,
+                    Json(SerNetworkInfo {
+                        peers: network_info.num_peers(),
+                        pending: connections.num_pending(),
+                        connections: connections.num_connections(),
+                        established: connections.num_established(),
+                        pending_incoming: connections.num_pending_incoming(),
+                        pending_outgoing: connections.num_pending_outgoing(),
+                        established_incoming: connections.num_established_incoming(),
+                        established_outgoing: connections.num_established_outgoing(),
+                    }),
+                )
+                    .into_response()
             }
-            .into_response(),
         },
     }
 }
@@ -176,7 +179,7 @@ pub(crate) async fn remove_listener(
         Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
             Err(e) => handle_dragoon_error(e, &cmd_name),
-            Ok(good) => Json(good).into_response(),
+            Ok(good) => (StatusCode::OK, Json(good)).into_response(),
         },
     }
 }
@@ -192,13 +195,16 @@ pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> R
         Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
             Err(e) => handle_dragoon_error(e, &cmd_name),
-            Ok(connected_peers) => Json(
-                connected_peers
-                    .iter()
-                    .map(|p| p.to_base58())
-                    .collect::<Vec<String>>(),
+            Ok(connected_peers) => (
+                StatusCode::OK,
+                Json(
+                    connected_peers
+                        .iter()
+                        .map(|p| p.to_base58())
+                        .collect::<Vec<String>>(),
+                ),
             )
-            .into_response(),
+                .into_response(),
         },
     }
 }
