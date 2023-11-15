@@ -1,15 +1,15 @@
-use std::fmt::{Debug, Formatter};
 use axum::http::StatusCode;
-use axum::Json;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
+use std::fmt::{Debug, Formatter};
 use thiserror::Error;
 
 #[derive(Clone, Error, PartialEq)]
 pub enum DragoonError {
     #[error("Bad listener given")]
-    BadListener,
+    BadListener(String),
     #[error("unexpected error from Dragoon")]
-    UnexpectedError
+    UnexpectedError,
 }
 
 impl Debug for DragoonError {
@@ -23,8 +23,11 @@ impl IntoResponse for DragoonError {
     fn into_response(self) -> Response {
         let (status, err_msg) = match self {
             DragoonError::UnexpectedError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            DragoonError::BadListener => (StatusCode::BAD_REQUEST, self.to_string()),
+            DragoonError::BadListener(ref msg) => {
+                (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
+            }
         };
         (status, Json(format!("{}", err_msg))).into_response()
     }
 }
+

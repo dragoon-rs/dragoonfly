@@ -115,13 +115,24 @@ impl DragoonNetwork {
                         }
                     } else {
                         error!("cannot call swarm::listen_on");
-                        if sender.send(Err(Box::new(BadListener))).is_err() {
+                        if sender
+                            .send(Err(Box::new(BadListener(
+                                "could not listen on the swarm".to_string(),
+                            ))))
+                            .is_err()
+                        {
                             error!("Cannot send result");
                         }
                     }
                 } else {
                     error!("cannot parse addr {}", multiaddr);
-                    if sender.send(Err(Box::new(BadListener))).is_err() {
+                    if sender
+                        .send(Err(Box::new(BadListener(format!(
+                            "could not parse {}",
+                            multiaddr
+                        )))))
+                        .is_err()
+                    {
                         error!("Cannot send result");
                     }
                 }
@@ -169,7 +180,13 @@ impl DragoonNetwork {
                     }
                 } else {
                     error!("could not find listener");
-                    if sender.send(Err(Box::new(BadListener))).is_err() {
+                    if sender
+                        .send(Err(Box::new(BadListener(format!(
+                            "listener {} not found",
+                            listener_id
+                        )))))
+                        .is_err()
+                    {
                         error!("Cannot send result");
                     }
                 }
