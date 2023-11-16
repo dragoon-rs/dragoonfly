@@ -33,19 +33,17 @@ def run-command [node: string]: string -> any {
 export def main [
     --start: string, # the ip+port of a single node to start
     --spawn-swarm-with-tmux: list<string>, # a list of ip+port to open in new Tmux panes (has precedence over --start)
-    --kill-tmux-swarm: string, # the name of the process running the nodes of the swarm (has precedence over --spawn-swarm-with-tmux)
+    --kill-tmux-swarm, # whether to kill the node or not (has precedence over --spawn-swarm-with-tmux)
 ]: nothing -> nothing {
-    if $kill_tmux_swarm != null {
-        ^tmux list-panes -F "#{pane_current_command}:#{pane_id}"
-            | lines
-            | parse "{cmd}:{id}"
-            | where cmd == $kill_tmux_swarm
-            | each { ^tmux kill-pane -t $in.id }
+    if $kill_tmux_swarm {
+        ^tmux list-panes -F "#{pane_id}" | lines | reverse | each { ^tmux kill-pane -t $in }
     } else if $spawn_swarm_with_tmux != null and ($spawn_swarm_with_tmux | is-empty | not $in) {
+        ^tmux new-window nu --execute 'use app.nu'
         ^tmux split-window -h nu --execute $'use app.nu; app --start ($spawn_swarm_with_tmux.0)'
         $spawn_swarm_with_tmux | skip 1 | each {
             ^tmux split-window nu --execute $'use app.nu; app --start ($in)'
         }
+        ^tmux select-pane -t (^tmux list-panes -F "#{pane_id}" | lines | first)
     } else if $start != null {
         ^cargo run -- $start
     } else {
