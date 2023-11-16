@@ -23,8 +23,30 @@ def run-command [node: string]: string -> any {
 }
 
 # launch the application
-export def main [--start: string]: nothing -> nothing {
-    if $start != null {
+#
+# # Examples
+#     start a local swarm with two nodes, using Tmux
+#     > app --spawn-swarm-with-tmux ["127.0.0.1:3000", "127.0.0.1:3001"]
+#
+#     kill all the nodes of the local swarm launched with Tmux
+#     > app --kill-tmux-swarm target/debug/dragoonfly
+export def main [
+    --start: string,
+    --spawn-swarm-with-tmux: list<string>,
+    --kill-tmux-swarm: string,
+]: nothing -> nothing {
+    if $kill_tmux_swarm != null {
+        ^tmux list-panes -F "#{pane_current_command}:#{pane_id}"
+            | lines
+            | parse "{cmd}:{id}"
+            | where cmd == $kill_tmux_swarm
+            | each { ^tmux kill-pane -t $in.id }
+    } else if $spawn_swarm_with_tmux != null and ($spawn_swarm_with_tmux | is-empty | not $in) {
+        ^tmux split-window -h nu --execute $'use app.nu; app --start ($spawn_swarm_with_tmux.0)'
+        $spawn_swarm_with_tmux | skip 1 | each {
+            ^tmux split-window nu --execute $'use app.nu; app --start ($in)'
+        }
+    } else if $start != null {
         ^cargo run -- $start
     } else {
         print (help app)
