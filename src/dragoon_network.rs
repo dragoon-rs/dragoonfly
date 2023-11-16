@@ -248,13 +248,23 @@ impl DragoonNetwork {
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
                     info!("adding peer {} from {}", addr, multiaddr);
                     if let Some(Protocol::P2p(hash)) = addr.iter().last() {
-                        let peer_id = PeerId::from_multihash(hash).expect("Valid hash.");
-                        self.swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .add_address(&peer_id, addr);
-                        if sender.send(Ok(())).is_err() {
-                            error!("could not send result");
+                        match PeerId::from_multihash(hash) {
+                            Ok(peer_id) => {
+                                self.swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .add_address(&peer_id, addr);
+                                if sender.send(Ok(())).is_err() {
+                                    error!("could not send result");
+                                }
+                            }
+                            Err(multihash) => {
+                                error!("not a hash {:?}", multihash);
+                                let err = BadListener(format!("not a hash {:?}", multihash));
+                                if sender.send(Err(Box::new(err))).is_err() {
+                                    error!("Cannot send result");
+                                }
+                            }
                         }
                     }
                 } else {
