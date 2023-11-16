@@ -15,7 +15,7 @@ use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
 use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
-use crate::error::DragoonError::BadListener;
+use crate::error::DragoonError::{BadListener, UnexpectedError};
 
 pub(crate) async fn create_swarm(
     id_keys: Keypair,
@@ -117,9 +117,7 @@ impl DragoonNetwork {
                         }
                         Err(te) => {
                             let err_msg = match te {
-                                TransportError::Other(e) => {
-                                    e.to_string()
-                                }
+                                TransportError::Other(e) => e.to_string(),
                                 TransportError::MultiaddrNotSupported(addr) => {
                                     format!("multiaddr {} not supported", addr)
                                 }
@@ -210,6 +208,36 @@ impl DragoonNetwork {
 
                 if sender.send(Ok(connected_peers)).is_err() {
                     error!("could not send list of connected peers");
+                }
+            }
+            DragoonCommand::Dial { multiaddr, sender } => {
+                if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
+                    info!("dialing {}", addr);
+                    match self.swarm.dial(addr) {
+                        Ok(()) => {
+                            if sender.send(Ok(())).is_err() {
+                                error!("could not send result");
+                            }
+                        }
+                        Err(de) => {
+                            error!("error: {}", de);
+
+                            if sender.send(Err(Box::new(UnexpectedError))).is_err() {
+                                error!("Cannot send result");
+                            }
+                        }
+                    }
+                } else {
+                    error!("cannot parse addr {}", multiaddr);
+                    if sender
+                        .send(Err(Box::new(BadListener(format!(
+                            "could not parse {}",
+                            multiaddr
+                        )))))
+                        .is_err()
+                    {
+                        error!("Cannot send result");
+                    }
                 }
             }
         }

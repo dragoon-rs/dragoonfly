@@ -30,6 +30,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/get-network-info", get(commands::get_network_info))
         .route("/remove-listener/:id", get(commands::remove_listener))
         .route("/get-connected-peers", get(commands::get_connected_peers))
+        .route("/dial/:addr", get(commands::dial))
         .with_state(Arc::new(app::AppState::new(cmd_sender)));
 
     let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {

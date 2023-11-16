@@ -74,3 +74,12 @@ export def remove-listener [
 export def get-connected-peers [--node: string = $DEFAULT_IP]: nothing -> list<string> {
     "get-connected-peers" | run-command $node
 }
+
+export def dial [
+    multiaddr: string, # the multi-address to dial
+    --node: string = $DEFAULT_IP
+]: nothing -> string {
+    let multiaddr = $multiaddr | str replace --all '/' '%2F'
+
+    $"dial/($multiaddr)" | run-command $node
+}

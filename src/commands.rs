@@ -51,6 +51,10 @@ pub(crate) enum DragoonCommand {
     GetConnectedPeers {
         sender: oneshot::Sender<Result<Vec<PeerId>, Box<dyn Error + Send>>>,
     },
+    Dial {
+        multiaddr: String,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -62,6 +66,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetNetworkInfo { .. } => write!(f, "get-network-info"),
             DragoonCommand::RemoveListener { .. } => write!(f, "remove-listener"),
             DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
+            DragoonCommand::Dial { .. } => write!(f, "dial"),
         }
     }
 }
@@ -204,6 +209,25 @@ pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> R
                 ),
             )
                 .into_response(),
+        },
+    }
+}
+
+pub(crate) async fn dial(
+    Path(multiaddr): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (sender, receiver) = oneshot::channel();
+
+    let cmd = DragoonCommand::Dial { multiaddr, sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
         },
     }
 }
