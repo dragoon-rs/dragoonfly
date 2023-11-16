@@ -1,6 +1,6 @@
 use libp2p::futures::channel::mpsc;
 use libp2p::futures::StreamExt;
-use libp2p::request_response;
+use libp2p::{request_response, TransportError};
 use libp2p_core::identity::Keypair;
 use libp2p_core::transport::ListenerId;
 use libp2p_core::{Multiaddr, PeerId};
@@ -96,32 +96,40 @@ impl DragoonNetwork {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
                 if let Ok(addr) = multiaddr.parse() {
-                    if let Ok(listener_id) = self.swarm.listen_on(addr) {
-                        info!("listening on {}", multiaddr);
+                    match self.swarm.listen_on(addr) {
+                        Ok(listener_id) => {
+                            info!("listening on {}", multiaddr);
 
-                        let id = regex::Regex::new(r"ListenerId\((\d+)\)")
-                            .unwrap()
-                            .captures(&format!("{:?}", listener_id))
-                            .unwrap()
-                            .get(1)
-                            .unwrap()
-                            .as_str()
-                            .parse::<u64>()
-                            .unwrap();
-                        self.listeners.insert(id, listener_id);
+                            let id = regex::Regex::new(r"ListenerId\((\d+)\)")
+                                .unwrap()
+                                .captures(&format!("{:?}", listener_id))
+                                .unwrap()
+                                .get(1)
+                                .unwrap()
+                                .as_str()
+                                .parse::<u64>()
+                                .unwrap();
+                            self.listeners.insert(id, listener_id);
 
-                        if sender.send(Ok(listener_id)).is_err() {
-                            error!("could not send listener ID");
+                            if sender.send(Ok(listener_id)).is_err() {
+                                error!("could not send listener ID");
+                            }
                         }
-                    } else {
-                        error!("cannot call swarm::listen_on");
-                        if sender
-                            .send(Err(Box::new(BadListener(
-                                "could not listen on the swarm".to_string(),
-                            ))))
-                            .is_err()
-                        {
-                            error!("Cannot send result");
+                        Err(te) => {
+                            let err_msg = match te {
+                                TransportError::Other(e) => {
+                                    e.to_string()
+                                }
+                                TransportError::MultiaddrNotSupported(addr) => {
+                                    format!("multiaddr {} not supported", addr)
+                                }
+                            };
+
+                            error!("{}", err_msg);
+
+                            if sender.send(Err(Box::new(BadListener(err_msg)))).is_err() {
+                                error!("Cannot send result");
+                            }
                         }
                     }
                 } else {
