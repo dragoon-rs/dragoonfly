@@ -259,7 +259,15 @@ impl DragoonNetwork {
                     }
                 } else {
                     error!("cannot parse addr {}", multiaddr);
-                    //TODO: Send error to sender and check if is_err
+                    if sender
+                        .send(Err(Box::new(BadListener(format!(
+                            "could not parse {}",
+                            multiaddr
+                        )))))
+                        .is_err()
+                    {
+                        error!("Cannot send result");
+                    }
                 }
             }
         }
