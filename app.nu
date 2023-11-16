@@ -31,9 +31,9 @@ def run-command [node: string]: string -> any {
 #     kill all the nodes of the local swarm launched with Tmux
 #     > app --kill-tmux-swarm target/debug/dragoonfly
 export def main [
-    --start: string,
-    --spawn-swarm-with-tmux: list<string>,
-    --kill-tmux-swarm: string,
+    --start: string, # the ip+port of a single node to start
+    --spawn-swarm-with-tmux: list<string>, # a list of ip+port to open in new Tmux panes (has precedence over --start)
+    --kill-tmux-swarm: string, # the name of the process running the nodes of the swarm (has precedence over --spawn-swarm-with-tmux)
 ]: nothing -> nothing {
     if $kill_tmux_swarm != null {
         ^tmux list-panes -F "#{pane_current_command}:#{pane_id}"
