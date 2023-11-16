@@ -35,4 +35,3 @@ impl IntoResponse for DragoonError {
         (status, Json(format!("{}", err_msg))).into_response()
     }
 }
-

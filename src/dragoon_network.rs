@@ -2,6 +2,7 @@ use libp2p::futures::channel::mpsc;
 use libp2p::futures::StreamExt;
 use libp2p::{request_response, TransportError};
 use libp2p_core::identity::Keypair;
+use libp2p_core::multiaddr::Protocol;
 use libp2p_core::transport::ListenerId;
 use libp2p_core::{Multiaddr, PeerId};
 use libp2p_kad::store::MemoryStore;
@@ -11,7 +12,6 @@ use libp2p_swarm::{NetworkBehaviour, Swarm};
 use std::collections::HashMap;
 use std::error::Error;
 use std::iter;
-use libp2p_core::multiaddr::Protocol;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
@@ -244,16 +244,19 @@ impl DragoonNetwork {
                     }
                 }
             }
-            DragoonCommand::AddPeer {multiaddr, sender} => {
+            DragoonCommand::AddPeer { multiaddr, sender } => {
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
                     info!("adding peer {} from {}", addr, multiaddr);
-                   if let Some( Protocol::P2p(hash)) = addr.iter().last() {
-                       let peer_id = PeerId::from_multihash(hash).expect("Valid hash.");
-                       self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
-                       if sender.send(Ok(())).is_err() {
-                           error!("could not send result");
-                       }
-                   }
+                    if let Some(Protocol::P2p(hash)) = addr.iter().last() {
+                        let peer_id = PeerId::from_multihash(hash).expect("Valid hash.");
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .add_address(&peer_id, addr);
+                        if sender.send(Ok(())).is_err() {
+                            error!("could not send result");
+                        }
+                    }
                 } else {
                     error!("cannot parse addr {}", multiaddr);
                     //TODO: Send error to sender and check if is_err
