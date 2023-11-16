@@ -111,7 +111,7 @@ impl DragoonNetwork {
                                 .unwrap();
                             self.listeners.insert(id, listener_id);
 
-                            if sender.send(Ok(listener_id)).is_err() {
+                            if sender.send(Ok(id)).is_err() {
                                 error!("could not send listener ID");
                             }
                         }

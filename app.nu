@@ -40,7 +40,7 @@ export def listen [
 ]: nothing -> string {
     let multiaddr = $multiaddr | str replace --all '/' '%2F'
 
-    $"listen/($multiaddr)" | run-command $node | parse "ListenerId({id})" | into record | get id
+    $"listen/($multiaddr)" | run-command $node
 }
 
 # get the list of currently connected listeners

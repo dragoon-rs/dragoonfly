@@ -3,7 +3,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
-use libp2p_core::transport::ListenerId;
 use libp2p_core::Multiaddr;
 use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
@@ -34,7 +33,7 @@ use crate::error::DragoonError;
 pub(crate) enum DragoonCommand {
     Listen {
         multiaddr: String,
-        sender: oneshot::Sender<Result<ListenerId, Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<u64, Box<dyn Error + Send>>>,
     },
     GetListeners {
         sender: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn Error + Send>>>,
