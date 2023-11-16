@@ -8,6 +8,8 @@ use thiserror::Error;
 pub enum DragoonError {
     #[error("Bad listener given")]
     BadListener(String),
+    #[error("Could not dial a peer")]
+    DialError(String),
     #[error("unexpected error from Dragoon")]
     UnexpectedError,
 }
@@ -24,6 +26,9 @@ impl IntoResponse for DragoonError {
         let (status, err_msg) = match self {
             DragoonError::UnexpectedError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             DragoonError::BadListener(ref msg) => {
+                (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
+            }
+            DragoonError::DialError(ref msg) => {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
         };

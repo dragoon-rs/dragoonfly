@@ -15,7 +15,7 @@ use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
 use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
-use crate::error::DragoonError::{BadListener, UnexpectedError};
+use crate::error::DragoonError::{BadListener, DialError};
 
 pub(crate) async fn create_swarm(
     id_keys: Keypair,
@@ -222,7 +222,10 @@ impl DragoonNetwork {
                         Err(de) => {
                             error!("error: {}", de);
 
-                            if sender.send(Err(Box::new(UnexpectedError))).is_err() {
+                            if sender
+                                .send(Err(Box::new(DialError(de.to_string()))))
+                                .is_err()
+                            {
                                 error!("Cannot send result");
                             }
                         }
