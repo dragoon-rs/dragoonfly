@@ -1,10 +1,3 @@
-# launch the application
-export def main []: nothing -> nothing {
-    ^cargo run
-
-    null
-}
-
 const HTTP_OK = 200
 
 const DEFAULT_IP = "127.0.0.1:3000"
@@ -27,6 +20,17 @@ def run-command [node: string]: string -> any {
     }
 
     $res.body
+}
+
+# launch the application
+export def main [--start: string]: nothing -> nothing {
+    if $start != null {
+        ^cargo run -- $start
+    } else {
+        print (help app)
+    }
+
+    null
 }
 
 # start to listen on a multiaddr
