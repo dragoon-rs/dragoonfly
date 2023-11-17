@@ -42,11 +42,17 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     .parse()
     .unwrap();
 
+    let id = if let Some(id) = std::env::args().nth(2) {
+        id.parse::<u8>().unwrap()
+    } else {
+        0
+    };
+
     let http_server = axum::Server::bind(&ip_port).serve(app.into_make_service());
     tokio::spawn(http_server);
 
-    let kp = get_keypair(1);
-    info!("Peer id: {}", kp.public().to_peer_id());
+    let kp = get_keypair(id);
+    info!("Peer id: {} {}", kp.public().to_peer_id(), id);
 
     let swarm = dragoon_network::create_swarm(kp).await?;
     let network = DragoonNetwork::new(swarm, cmd_receiver);
