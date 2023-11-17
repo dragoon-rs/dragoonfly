@@ -1,3 +1,4 @@
+use futures::channel::oneshot;
 use libp2p::futures::channel::mpsc;
 use libp2p::futures::StreamExt;
 use libp2p::{request_response, TransportError};
@@ -6,12 +7,14 @@ use libp2p_core::multiaddr::Protocol;
 use libp2p_core::transport::ListenerId;
 use libp2p_core::{Multiaddr, PeerId};
 use libp2p_kad::store::MemoryStore;
-use libp2p_kad::{Kademlia, KademliaEvent};
+use libp2p_kad::{AddProviderOk, GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult, record};
 use libp2p_request_response::ProtocolSupport;
-use libp2p_swarm::{NetworkBehaviour, Swarm};
-use std::collections::HashMap;
+use libp2p_swarm::{ConnectionHandlerUpgrErr, NetworkBehaviour, Swarm, SwarmEvent};
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::iter;
+use libp2p_swarm::derive_prelude::Either;
+use tokio::io;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
@@ -66,6 +69,8 @@ pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
+    pending_start_providing: HashMap<QueryId, oneshot::Sender<()>>,
+    pending_get_providers: HashMap<QueryId, oneshot::Sender<HashSet<PeerId>>>,
 }
 
 impl DragoonNetwork {
@@ -77,6 +82,8 @@ impl DragoonNetwork {
             swarm,
             command_receiver,
             listeners: HashMap::new(),
+            pending_start_providing: Default::default(),
+            pending_get_providers: Default::default(),
         }
     }
 
@@ -84,12 +91,90 @@ impl DragoonNetwork {
         info!("Starting Dragoon Network");
         loop {
             futures::select! {
-                e = self.swarm.next() => info!("{:?}",e),
+                e = self.swarm.next() => self.handle_event(e.expect("Swarm stream to be infinite.")).await,
                 cmd = self.command_receiver.next() =>  match cmd {
                     Some(c) => self.handle_command(c).await,
                     None => return,
                 }
             }
+        }
+    }
+
+    async fn handle_event(
+        &mut self,
+        event: SwarmEvent<
+            DragoonEvent,
+            Either<ConnectionHandlerUpgrErr<io::Error>, io::Error>,
+        >,
+    ) {
+        match event {
+            SwarmEvent::Behaviour(DragoonEvent::Kademlia(
+                                      KademliaEvent::OutboundQueryProgressed {
+                                          id,
+                                          result: QueryResult::StartProviding(Ok(result_ok)),
+                                          ..
+                                      },
+                                  )) => {
+                let sender: oneshot::Sender<()> = self
+                    .pending_start_providing
+                    .remove(&id)
+                    .expect("Completed query to be previously pending.");
+                info!("started providing {:?}",result_ok);
+                let _ = sender.send(());
+            }
+            SwarmEvent::Behaviour(DragoonEvent::Kademlia(
+                                      KademliaEvent::OutboundQueryProgressed {
+                                          id,
+                                          result:
+                                          QueryResult::GetProviders(get_providers_result),
+                                          ..
+                                      },
+                                  )) => {
+                if let Ok(res) = get_providers_result {
+                    match res {
+                        GetProvidersOk::FoundProviders { key, providers } => {
+                            info!("Found providers");
+                            if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                sender.send(providers).expect("Receiver not to be dropped");
+
+                                // Finish the query. We are only interested in the first result.
+                                self.swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .query_mut(&id)
+                                    .unwrap()
+                                    .finish();
+                            }
+                        },
+                        GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                            info!("Did not found providers");
+                            if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                sender.send(HashSet::default()).expect("Receiver not to be dropped");
+
+                                // Finish the query. We are only interested in the first result.
+                                self.swarm
+                                    .behaviour_mut()
+                                    .kademlia
+                                    .query_mut(&id)
+                                    .unwrap()
+                                    .finish();
+                            }
+                        },
+                    }
+                } else {
+                    info!("GetProviders returned an error");
+                    if let Some(sender) = self.pending_get_providers.remove(&id) {
+                        sender.send(HashSet::default()).expect("Receiver not to be dropped");
+                        self.swarm
+                            .behaviour_mut()
+                            .kademlia
+                            .query_mut(&id)
+                            .unwrap()
+                            .finish();
+                    }
+                }
+            }
+            e => info!("{e:?}")
         }
     }
 
@@ -279,6 +364,24 @@ impl DragoonNetwork {
                         error!("Cannot send result");
                     }
                 }
+            }
+            DragoonCommand::StartProvide { key, sender } => {
+                if let Ok(query_id) = self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .start_providing(key.into_bytes().into())
+                {
+                    self.pending_start_providing.insert(query_id, sender);
+                }
+            }
+            DragoonCommand::GetProviders { key, sender } => {
+                let query_id = self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .get_providers(key.into_bytes().into());
+                self.pending_get_providers.insert(query_id, sender);
             }
         }
     }

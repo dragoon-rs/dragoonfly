@@ -7,6 +7,7 @@ use libp2p_core::Multiaddr;
 use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -59,6 +60,14 @@ pub(crate) enum DragoonCommand {
         multiaddr: String,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
+    StartProvide {
+        key: String,
+        sender: oneshot::Sender<()>,
+    },
+    GetProviders {
+        key: String,
+        sender: oneshot::Sender<HashSet<PeerId>>,
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -72,6 +81,8 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
             DragoonCommand::Dial { .. } => write!(f, "dial"),
             DragoonCommand::AddPeer { .. } => write!(f, "add-peer"),
+            DragoonCommand::StartProvide { .. } => write!(f, "provide"),
+            DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
         }
     }
 }
@@ -244,6 +255,36 @@ pub(crate) async fn add_peer(
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::AddPeer { multiaddr, sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(_) => (StatusCode::OK, Json("")).into_response(),
+    }
+}
+
+pub(crate) async fn start_provide(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::StartProvide { key, sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(_) => (StatusCode::OK, Json("")).into_response(),
+    }
+}
+
+pub(crate) async fn get_providers(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::GetProviders { key, sender };
     let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
 
