@@ -39,7 +39,7 @@ export def main [
     if $kill_tmux_swarm {
         ^tmux list-panes -F "#{pane_id}" | lines | reverse | each { ^tmux kill-pane -t $in }
     } else if $spawn_swarm_with_tmux != null and ($spawn_swarm_with_tmux | is-empty | not $in) {
-        ^tmux new-window nu --execute '$env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"; use app.nu'
+        ^tmux new-window nu --execute $'$env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"; use app.nu; let SWARM = (char lparen)"($spawn_swarm_with_tmux | to nuon)" | from nuon(char rparen)'
         ^tmux split-window -h nu --execute $'use app.nu; app --start ($spawn_swarm_with_tmux.0.ip_port) --seed ($spawn_swarm_with_tmux.0.seed)'
         $spawn_swarm_with_tmux | skip 1 | each {
             ^tmux split-window nu --execute $'use app.nu; app --start ($in.ip_port) --seed ($in.seed)'
