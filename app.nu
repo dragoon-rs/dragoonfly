@@ -28,8 +28,8 @@ def run-command [node: string]: string -> any {
 #     start a local swarm with two nodes, using Tmux
 #     > app --spawn-swarm-with-tmux --swarm [
 #         [ip_port, seed];
-#         ["127.0.0.1:3000", 0],
-#         ["127.0.0.1:3001", 1]
+#         ["127.0.0.1:3000", 0, "/ip4/127.0.0.1/tcp/31200"],
+#         ["127.0.0.1:3001", 1, "/ip4/127.0.0.1/tcp/31201"]
 #     ]
 #
 #     kill all the nodes of the local swarm launched with Tmux
@@ -38,7 +38,7 @@ export def main [
     --start: string, # the ip+port of a single node to start
     --seed: int = 0, # the seed for the keypair
     --spawn-swarm-with-tmux, # whether to spawn a swarm with Tmux or not (has precedence over --start)
-    --swarm: table<ip_port: string, seed: int>, # the table of nodes to open
+    --swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to open
     --kill-tmux-swarm, # whether to kill the node or not (has precedence over --spawn-swarm-with-tmux)
 ]: nothing -> nothing {
     if $kill_tmux_swarm {
