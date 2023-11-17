@@ -26,23 +26,36 @@ def run-command [node: string]: string -> any {
 #
 # # Examples
 #     start a local swarm with two nodes, using Tmux
-#     > app --spawn-swarm-with-tmux ["127.0.0.1:3000", "127.0.0.1:3001"]
+#     > app --spawn-swarm-with-tmux --swarm [
+#         [ip_port, seed];
+#         ["127.0.0.1:3000", 0],
+#         ["127.0.0.1:3001", 1]
+#     ]
 #
 #     kill all the nodes of the local swarm launched with Tmux
 #     > app --kill-tmux-swarm target/debug/dragoonfly
 export def main [
     --start: string, # the ip+port of a single node to start
     --seed: int = 0, # the seed for the keypair
-    --spawn-swarm-with-tmux: table<ip_port: string, seed: int>, # the table of nodes to open in new Tmux panes (has precedence over --start)
+    --spawn-swarm-with-tmux, # whether to spawn a swarm with Tmux or not (has precedence over --start)
+    --swarm: table<ip_port: string, seed: int>, # the table of nodes to open
     --kill-tmux-swarm, # whether to kill the node or not (has precedence over --spawn-swarm-with-tmux)
 ]: nothing -> nothing {
     if $kill_tmux_swarm {
         ^tmux list-panes -F "#{pane_id}" | lines | reverse | each { ^tmux kill-pane -t $in }
-    } else if $spawn_swarm_with_tmux != null and ($spawn_swarm_with_tmux | is-empty | not $in) {
-        ^tmux new-window nu --execute $'$env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"; use app.nu; let SWARM = (char lparen)"($spawn_swarm_with_tmux | to nuon)" | from nuon(char rparen)'
-        ^tmux split-window -h nu --execute $'use app.nu; app --start ($spawn_swarm_with_tmux.0.ip_port) --seed ($spawn_swarm_with_tmux.0.seed)'
-        $spawn_swarm_with_tmux | skip 1 | each {
-            ^tmux split-window nu --execute $'use app.nu; app --start ($in.ip_port) --seed ($in.seed)'
+    } else if $spawn_swarm_with_tmux != null and ($swarm | is-empty | not $in) {
+        ^tmux new-window nu --execute $"
+            $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
+            use app.nu
+            let SWARM = "($swarm | to nuon)" | from nuon
+        "
+        ^tmux split-window -h nu --execute $'
+            use app.nu; app --start ($swarm.0.ip_port) --seed ($swarm.0.seed)
+        '
+        $swarm | skip 1 | each {
+            ^tmux split-window nu --execute $'
+                use app.nu; app --start ($in.ip_port) --seed ($in.seed)
+            '
         }
         ^tmux select-pane -t (^tmux list-panes -F "#{pane_id}" | lines | first)
     } else if $start != null {
