@@ -44,11 +44,11 @@ export def main [
     if $kill_tmux_swarm {
         ^tmux list-panes -F "#{pane_id}" | lines | reverse | each { ^tmux kill-pane -t $in }
     } else if $spawn_swarm_with_tmux != null and ($swarm | is-empty | not $in) {
-        ^tmux new-window nu --execute $"
+        ^tmux new-window nu --execute $'
             $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
             use app.nu
-            let SWARM = "($swarm | to nuon)" | from nuon
-        "
+            let SWARM = (char lparen)"($swarm | to nuon)" | from nuon(char rparen)
+        '
         ^tmux split-window -h nu --execute $'
             use app.nu; app --start ($swarm.0.ip_port) --seed ($swarm.0.seed)
         '
