@@ -122,7 +122,6 @@ export def dial [
     $"dial/($multiaddr)" | run-command $node
 }
 
-
 export def add-peer [
     multiaddr: string, # the multi-address to add as a peer
     --node: string = $DEFAULT_IP
@@ -130,4 +129,18 @@ export def add-peer [
     let multiaddr = $multiaddr | str replace --all '/' '%2F'
 
     $"add-peer/($multiaddr)" | run-command $node
+}
+
+export def provide [
+    key: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    $"provide/($key)" | run-command $node
+}
+
+export def get-providers [
+    key: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    $"get-providers/($key)" | run-command $node
 }
