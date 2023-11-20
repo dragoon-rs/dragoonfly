@@ -143,7 +143,7 @@ export def start-provide [
     key: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
-    $"start-provde/($key)" | run-command $node
+    $"start-provide/($key)" | run-command $node
 }
 
 export def get-providers [
