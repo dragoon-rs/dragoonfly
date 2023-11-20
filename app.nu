@@ -1,5 +1,6 @@
 const HTTP = {
-    OK: 200
+    OK: 200,
+    NOT_FOUND: 404,
 }
 
 const DEFAULT_IP = "127.0.0.1:3000"
@@ -15,7 +16,12 @@ def run-command [node: string]: string -> any {
         | insert path $command
         | url join
         | http get $in --allow-errors --full
-    if $res.status != $HTTP.OK {
+
+    if $res.status == $HTTP.NOT_FOUND {
+        error make --unspanned {
+            msg: $"command `($command)` does not appear to be valid \(($res.status)\)"
+        }
+    } else if $res.status != $HTTP.OK {
         error make --unspanned {
             msg: $"($res.body) \(($res.status)\)"
         }
