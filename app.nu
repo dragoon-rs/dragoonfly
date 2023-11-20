@@ -1,4 +1,6 @@
-const HTTP_OK = 200
+const HTTP = {
+    OK: 200
+}
 
 const DEFAULT_IP = "127.0.0.1:3000"
 
@@ -13,7 +15,7 @@ def run-command [node: string]: string -> any {
         | insert path $command
         | url join
         | http get $in --allow-errors --full
-    if $res.status != $HTTP_OK {
+    if $res.status != $HTTP.OK {
         error make --unspanned {
             msg: $"($res.body) \(($res.status)\)"
         }
@@ -135,7 +137,7 @@ export def start-provide [
     key: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
-    $"start-provide/($key)" | run-command $node
+    $"start-provde/($key)" | run-command $node
 }
 
 export def get-providers [
