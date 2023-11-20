@@ -7,9 +7,7 @@ use libp2p_core::multiaddr::Protocol;
 use libp2p_core::transport::ListenerId;
 use libp2p_core::{Multiaddr, PeerId};
 use libp2p_kad::store::MemoryStore;
-use libp2p_kad::{
-    record, AddProviderOk, GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult,
-};
+use libp2p_kad::{GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult};
 use libp2p_request_response::ProtocolSupport;
 use libp2p_swarm::derive_prelude::Either;
 use libp2p_swarm::{ConnectionHandlerUpgrErr, NetworkBehaviour, Swarm, SwarmEvent};
@@ -130,7 +128,7 @@ impl DragoonNetwork {
             )) => {
                 if let Ok(res) = get_providers_result {
                     match res {
-                        GetProvidersOk::FoundProviders { key, providers } => {
+                        GetProvidersOk::FoundProviders { providers, .. } => {
                             info!("Found providers");
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
                                 sender.send(providers).expect("Receiver not to be dropped");
@@ -144,7 +142,7 @@ impl DragoonNetwork {
                                     .finish();
                             }
                         }
-                        GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                        GetProvidersOk::FinishedWithNoAdditionalRecord { .. } => {
                             info!("Did not found providers");
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
                                 sender
