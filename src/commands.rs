@@ -81,7 +81,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
             DragoonCommand::Dial { .. } => write!(f, "dial"),
             DragoonCommand::AddPeer { .. } => write!(f, "add-peer"),
-            DragoonCommand::StartProvide { .. } => write!(f, "provide"),
+            DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
         }
     }

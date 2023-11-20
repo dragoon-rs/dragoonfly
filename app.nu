@@ -131,11 +131,11 @@ export def add-peer [
     $"add-peer/($multiaddr)" | run-command $node
 }
 
-export def provide [
+export def start-provide [
     key: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
-    $"provide/($key)" | run-command $node
+    $"start-provide/($key)" | run-command $node
 }
 
 export def get-providers [
