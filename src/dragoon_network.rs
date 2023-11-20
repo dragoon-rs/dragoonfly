@@ -11,7 +11,7 @@ use libp2p_kad::{GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult};
 use libp2p_request_response::ProtocolSupport;
 use libp2p_swarm::derive_prelude::Either;
 use libp2p_swarm::{ConnectionHandlerUpgrErr, NetworkBehaviour, Swarm, SwarmEvent};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 use std::iter;
 use tokio::io;

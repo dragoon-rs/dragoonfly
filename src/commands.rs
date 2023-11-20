@@ -7,7 +7,6 @@ use libp2p_core::Multiaddr;
 use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
