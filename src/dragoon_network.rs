@@ -70,7 +70,7 @@ pub(crate) struct DragoonNetwork {
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing: HashMap<QueryId, oneshot::Sender<()>>,
-    pending_get_providers: HashMap<QueryId, oneshot::Sender<HashSet<PeerId>>>,
+    pending_get_providers: HashMap<QueryId, oneshot::Sender<Vec<PeerId>>>,
 }
 
 impl DragoonNetwork {
@@ -129,33 +129,14 @@ impl DragoonNetwork {
                 if let Ok(res) = get_providers_result {
                     match res {
                         GetProvidersOk::FoundProviders { providers, .. } => {
-                            info!("Found providers");
-                            if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                sender.send(providers).expect("Receiver not to be dropped");
-
-                                // Finish the query. We are only interested in the first result.
-                                self.swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .query_mut(&id)
-                                    .unwrap()
-                                    .finish();
-                            }
+                            info!("Found providers {providers:?}");
                         }
-                        GetProvidersOk::FinishedWithNoAdditionalRecord { .. } => {
-                            info!("Did not found providers");
+                        GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                            info!("Finished get providers {closest_peers:?}");
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
                                 sender
-                                    .send(HashSet::default())
+                                    .send(closest_peers)
                                     .expect("Receiver not to be dropped");
-
-                                // Finish the query. We are only interested in the first result.
-                                self.swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .query_mut(&id)
-                                    .unwrap()
-                                    .finish();
                             }
                         }
                     }
@@ -163,7 +144,7 @@ impl DragoonNetwork {
                     info!("GetProviders returned an error");
                     if let Some(sender) = self.pending_get_providers.remove(&id) {
                         sender
-                            .send(HashSet::default())
+                            .send(Vec::default())
                             .expect("Receiver not to be dropped");
                         self.swarm
                             .behaviour_mut()

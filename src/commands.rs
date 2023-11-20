@@ -66,7 +66,7 @@ pub(crate) enum DragoonCommand {
     },
     GetProviders {
         key: String,
-        sender: oneshot::Sender<HashSet<PeerId>>,
+        sender: oneshot::Sender<Vec<PeerId>>,
     },
 }
 
