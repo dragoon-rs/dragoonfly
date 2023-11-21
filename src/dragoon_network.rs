@@ -5,7 +5,7 @@ use libp2p::{request_response, TransportError};
 use libp2p_core::identity::Keypair;
 use libp2p_core::multiaddr::Protocol;
 use libp2p_core::transport::ListenerId;
-use libp2p_core::{Multiaddr, PeerId};
+use libp2p_core::{ConnectedPoint, Multiaddr, PeerId};
 use libp2p_kad::store::MemoryStore;
 use libp2p_kad::{GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult};
 use libp2p_request_response::ProtocolSupport;
@@ -155,6 +155,19 @@ impl DragoonNetwork {
                     }
                 }
             }
+            // SwarmEvent::ConnectionEstablished { peer_id, endpoint, num_established, concurrent_dial_errors, established_in } => {
+            //     match endpoint {
+            //         ConnectedPoint::Listener { local_addr, send_back_addr } => {
+            //             self.swarm
+            //                 .behaviour_mut()
+            //                 .kademlia.bootstrap()
+            //                 .add_address(peer_id, )
+            //         }
+            //         ConnectedPoint::Dialer { address, role_override } => {
+            //             info!("connectionEstablished to {adrress:?}");
+            //         }
+            //     }
+            // }
             e => info!("{e:?}"),
         }
     }
@@ -363,6 +376,16 @@ impl DragoonNetwork {
                     .kademlia
                     .get_providers(key.into_bytes().into());
                 self.pending_get_providers.insert(query_id, sender);
+            }
+            DragoonCommand::Bootstrap { sender } => {
+                let query_id = self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .bootstrap();
+                
+                if sender.send(()).is_err() {
+                    error!("could not send result");
+                }
             }
         }
     }

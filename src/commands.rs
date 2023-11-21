@@ -8,7 +8,7 @@ use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::fmt::Debug;
+use std::fmt::{Debug, write};
 use std::sync::Arc;
 use tracing::error;
 
@@ -67,6 +67,9 @@ pub(crate) enum DragoonCommand {
         key: String,
         sender: oneshot::Sender<Vec<PeerId>>,
     },
+    Bootstrap {
+        sender: oneshot::Sender<()>,
+    }
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -82,6 +85,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::AddPeer { .. } => write!(f, "add-peer"),
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
+            DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
         }
     }
 }
@@ -299,6 +303,21 @@ pub(crate) async fn get_providers(
             ),
         )
             .into_response(),
+    }
+}
+
+pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::Bootstrap { sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+            Err(e) => handle_canceled(e, &cmd_name),
+            Ok(_) => (
+                StatusCode::OK,
+                Json(""),
+            ).into_response(),
     }
 }
 
