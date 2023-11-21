@@ -9,7 +9,6 @@ use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
-use std::fmt::{Debug, write};
 use std::sync::Arc;
 use tracing::error;
 
