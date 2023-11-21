@@ -55,7 +55,7 @@ export def main [
         ^tmux new-window nu --execute $'
             $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
             use app.nu
-            let SWARM = (char lparen)"($swarm | to nuon)" | from nuon(char rparen)
+            const SWARM = ($swarm | to nuon)
         '
         ^tmux split-window -h nu --execute $'
             use app.nu; app --start ($swarm.0.ip_port) --seed ($swarm.0.seed)
