@@ -11,7 +11,7 @@ use libp2p_kad::{GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult};
 use libp2p_request_response::ProtocolSupport;
 use libp2p_swarm::derive_prelude::Either;
 use libp2p_swarm::{ConnectionHandlerUpgrErr, NetworkBehaviour, Swarm, SwarmEvent};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::iter;
 use tokio::io;
@@ -70,7 +70,7 @@ pub(crate) struct DragoonNetwork {
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing: HashMap<QueryId, oneshot::Sender<()>>,
-    pending_get_providers: HashMap<QueryId, oneshot::Sender<Vec<PeerId>>>,
+    pending_get_providers: HashMap<QueryId, oneshot::Sender<HashSet<PeerId>>>,
 }
 
 impl DragoonNetwork {
@@ -130,21 +130,21 @@ impl DragoonNetwork {
                     match res {
                         GetProvidersOk::FoundProviders { providers, .. } => {
                             info!("Found providers {providers:?}");
+                            if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                sender
+                                    .send(providers)
+                                    .expect("Receiver not to be dropped");
+                            }
                         }
                         GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
                             info!("Finished get providers {closest_peers:?}");
-                            if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                sender
-                                    .send(closest_peers)
-                                    .expect("Receiver not to be dropped");
-                            }
                         }
                     }
                 } else {
                     info!("GetProviders returned an error");
                     if let Some(sender) = self.pending_get_providers.remove(&id) {
                         sender
-                            .send(Vec::default())
+                            .send(HashSet::default())
                             .expect("Receiver not to be dropped");
                         self.swarm
                             .behaviour_mut()

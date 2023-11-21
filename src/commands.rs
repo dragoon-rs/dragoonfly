@@ -7,6 +7,7 @@ use libp2p_core::Multiaddr;
 use libp2p_core::PeerId;
 use libp2p_swarm::NetworkInfo;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Debug, write};
 use std::sync::Arc;
@@ -65,7 +66,7 @@ pub(crate) enum DragoonCommand {
     },
     GetProviders {
         key: String,
-        sender: oneshot::Sender<Vec<PeerId>>,
+        sender: oneshot::Sender<HashSet<PeerId>>,
     },
     Bootstrap {
         sender: oneshot::Sender<()>,
