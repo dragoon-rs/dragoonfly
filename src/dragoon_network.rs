@@ -131,9 +131,7 @@ impl DragoonNetwork {
                         GetProvidersOk::FoundProviders { providers, .. } => {
                             info!("Found providers {providers:?}");
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                sender
-                                    .send(providers)
-                                    .expect("Receiver not to be dropped");
+                                sender.send(providers).expect("Receiver not to be dropped");
                             }
                         }
                         GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
@@ -378,11 +376,8 @@ impl DragoonNetwork {
                 self.pending_get_providers.insert(query_id, sender);
             }
             DragoonCommand::Bootstrap { sender } => {
-                let query_id = self.swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .bootstrap();
-                
+                self.swarm.behaviour_mut().kademlia.bootstrap().unwrap();
+
                 if sender.send(()).is_err() {
                     error!("could not send result");
                 }
