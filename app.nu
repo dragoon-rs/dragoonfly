@@ -152,3 +152,9 @@ export def get-providers [
 ]: nothing -> any {
     $"get-providers/($key)" | run-command $node
 }
+
+export def bootstrap [
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    "bootstrap" | run-command $node
+}
