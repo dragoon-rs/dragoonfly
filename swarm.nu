@@ -22,13 +22,17 @@ export def "swarm run" [
         }
     }
 
+    let log_dir = $LOG_DIR | path join (random uuid)
+
+    log info $"logging to `($log_dir)/*.log`"
+
     ^cargo build --release
-    mkdir $LOG_DIR
+    mkdir $log_dir
     for node in $swarm {
         # FIXME: don't use Bash here
         log info $"launching node ($node.seed) \(($node.ip_port)\)"
         ^bash -c $"
-            cargo run -- ($node.ip_port) ($node.seed) 1> ($LOG_DIR)/($node.seed).log 2> /dev/null &
+            cargo run -- ($node.ip_port) ($node.seed) 1> ($log_dir)/($node.seed).log 2> /dev/null &
         "
     }
     ^$nu.current-exe --execute $'
