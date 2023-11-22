@@ -13,6 +13,8 @@ pub enum DragoonError {
     UnexpectedError,
     #[error("Could not provide")]
     ProviderError(String),
+    #[error("Bootstrap errro")]
+    BootstrapError(String),
 }
 
 impl IntoResponse for DragoonError {
@@ -26,6 +28,9 @@ impl IntoResponse for DragoonError {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
             DragoonError::ProviderError(ref msg) => {
+                (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
+            }
+            DragoonError::BootstrapError(ref msg) => {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
         };
