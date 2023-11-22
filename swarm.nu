@@ -3,8 +3,17 @@ use std log
 const NAME = "dragoonfly"
 const LOG_DIR = ($nu.temp-path | path join $NAME)
 
-# launch a swarm
-export def "swarm create" [
+# create a swarm table
+export def "swarm create" [n: int] {
+    seq 0 ($n - 1) | each { {
+        ip_port: $"127.0.0.1:(3_000 + $in)",
+        seed: $in,
+        multiaddr: $"/ip4/127.0.0.1/tcp/(31_200 + $in)",
+    } }
+}
+
+# run a swarm
+export def "swarm run" [
     swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to run
 ]: nothing -> nothing {
     if ($swarm | is-empty) {
