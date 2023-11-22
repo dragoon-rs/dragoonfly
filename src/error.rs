@@ -1,10 +1,9 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use std::fmt::{Debug, Formatter};
 use thiserror::Error;
 
-#[derive(Clone, Error, PartialEq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum DragoonError {
     #[error("Bad listener given")]
     BadListener(String),
@@ -12,13 +11,6 @@ pub enum DragoonError {
     DialError(String),
     #[error("unexpected error from Dragoon")]
     UnexpectedError,
-}
-
-impl Debug for DragoonError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self)?;
-        Ok(())
-    }
 }
 
 impl IntoResponse for DragoonError {
