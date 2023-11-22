@@ -9,9 +9,6 @@ members = ["semi-avid-pc"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libp2p = { default-features = false, features = ["async-std", "cbor", "dns", "kad", "noise", "macros", "request-response", "tcp", "websocket", "yamux", "identify"], version = "0.53.0" }
-async-trait = { version = "0.1.74", features = [] }
-async-std = { version = "1.12", features = ["attributes"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.17"
@@ -27,6 +24,7 @@ features = [
     "async-std",
     "cbor",
     "dns",
+    "identify",
     "kad",
     "noise",
     "request-response",
