@@ -53,17 +53,20 @@ export def main [
     --in-background, # run the swarm in the background and log to `/tmp/<seed>.log` (has precedence over --kill-swarm)
 ]: nothing -> nothing {
     if $in_background {
-        cargo build --release
-        ^bash -c $"cargo run -- ($swarm.0.ip_port) ($swarm.0.seed) 1> /tmp/($swarm.0.seed).log &"
-        for node in ($swarm | skip 1) {
-            ^bash -c $"cargo run -- ($node.ip_port) ($node.seed) 1> /tmp/($node.seed).log 2> /dev/null &"
+        ^cargo build --release
+        mkdir /tmp/dragoonfly
+        for node in $swarm {
+            # FIXME: don't use Bash here
+            log info $"launching node ($node.seed) \(($node.ip_port)\)"
+            ^bash -c $"
+                cargo run -- ($node.ip_port) ($node.seed) 1> /tmp/dragoonfly/($node.seed).log 2> /dev/null &
+            "
         }
         ^$nu.current-exe --execute $'
             $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
             $env.NU_LOG_LEVEL = "DEBUG"
             use app.nu
             const SWARM = ($swarm | to nuon)
-            clear
         '
     } else if $kill_swarm {
         if $spawn_swarm_with_tmux {
@@ -74,7 +77,7 @@ export def main [
                 kill $it.pid
             }
 
-            ignore
+            exit
         }
     } else if $spawn_swarm_with_tmux and ($swarm | is-empty | not $in) {
         ^tmux new-window nu --execute $'
