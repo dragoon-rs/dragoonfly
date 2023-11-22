@@ -198,12 +198,16 @@ impl DragoonNetwork {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
                 request_response::Event::Message { message, .. },
             )) => match message {
-                request_response::Message::Request { .. } => {
-                    // FIXME: should do something there
-                    // self.event_sender
-                    //     .send()
-                    //     .await
-                    //     .expect("Event receiver not to be dropped.");
+                request_response::Message::Request {
+                    request, channel, ..
+                } => {
+                    self.event_sender
+                        .send(Event::InboundRequest {
+                            request: request.0,
+                            channel,
+                        })
+                        .await
+                        .expect("Event receiver not to be dropped.");
                 }
                 request_response::Message::Response {
                     request_id,
@@ -433,6 +437,13 @@ impl DragoonNetwork {
                     .request_response
                     .send_request(&peer, FileRequest(key));
                 self.pending_request_file.insert(request_id, sender);
+            }
+            DragoonCommand::AddFile { file, channel } => {
+                self.swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_response(channel, FileResponse(file))
+                    .expect("Connection to peer to be still open.");
             }
         }
     }

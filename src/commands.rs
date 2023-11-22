@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
+use libp2p::request_response::ResponseChannel;
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use tracing::error;
 
 use crate::app::AppState;
+use crate::dragoon_network::FileResponse;
 use crate::error::DragoonError;
 
 // Potential other commands:
@@ -74,6 +76,10 @@ pub(crate) enum DragoonCommand {
         peer: PeerId,
         sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
     },
+    AddFile {
+        file: Vec<u8>,
+        channel: ResponseChannel<FileResponse>,
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -91,6 +97,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             DragoonCommand::Get { .. } => write!(f, "get"),
+            DragoonCommand::AddFile { .. } => write!(f, "add-file"),
         }
     }
 }
