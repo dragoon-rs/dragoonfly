@@ -49,11 +49,34 @@ export def main [
     --seed: int = 0, # the seed for the keypair
     --spawn-swarm-with-tmux, # whether to spawn a swarm with Tmux or not (has precedence over --start)
     --swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to open
-    --kill-tmux-swarm, # whether to kill the node or not (has precedence over --spawn-swarm-with-tmux)
+    --kill-swarm, # whether to kill the node or not (has precedence over --spawn-swarm-with-tmux)
+    --in-background, # run the swarm in the background and log to `/tmp/<seed>.log` (has precedence over --kill-swarm)
 ]: nothing -> nothing {
-    if $kill_tmux_swarm {
-        ^tmux list-panes -F "#{pane_id}" | lines | reverse | each { ^tmux kill-pane -t $in }
-    } else if $spawn_swarm_with_tmux != null and ($swarm | is-empty | not $in) {
+    if $in_background {
+        cargo build --release
+        ^bash -c $"cargo run -- ($swarm.0.ip_port) ($swarm.0.seed) 1> /tmp/($swarm.0.seed).log &"
+        for node in ($swarm | skip 1) {
+            ^bash -c $"cargo run -- ($node.ip_port) ($node.seed) 1> /tmp/($node.seed).log 2> /dev/null &"
+        }
+        ^$nu.current-exe --execute $'
+            $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
+            $env.NU_LOG_LEVEL = "DEBUG"
+            use app.nu
+            const SWARM = ($swarm | to nuon)
+            clear
+        '
+    } else if $kill_swarm {
+        if $spawn_swarm_with_tmux {
+            ^tmux list-panes -F "#{pane_id}" | lines | reverse | each { ^tmux kill-pane -t $in }
+        } else {
+            ps | where name =~ dragoonfly | each {|it|
+                print $"killing ($it.pid)"
+                kill $it.pid
+            }
+
+            ignore
+        }
+    } else if $spawn_swarm_with_tmux and ($swarm | is-empty | not $in) {
         ^tmux new-window nu --execute $'
             $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
             $env.NU_LOG_LEVEL = "DEBUG"
