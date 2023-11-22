@@ -22,6 +22,8 @@ sleep 500ms
 log info "bootstrapping nodes"
 for node in $NODES {
     app bootstrap --node $node
+    sleep 200ms
+    app bootstrap --node $node
 }
 
 log info "show connected peers in order"
