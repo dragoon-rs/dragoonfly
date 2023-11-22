@@ -350,6 +350,9 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::Get {
         key: key.clone(),
+        // FIXME: should use all the providers here instead of just the first one,
+        // run the requests on all of them and then "future select" the first one to complete
+        // successfully.
         peer: *providers.into_iter().collect::<Vec<_>>().get(0).unwrap(),
         sender,
     };

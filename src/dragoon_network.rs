@@ -201,6 +201,7 @@ impl DragoonNetwork {
                 request_response::Message::Request {
                         ..
                 } => {
+                    // FIXME: should do something there
                     // self.event_sender
                     //     .send()
                     //     .await
