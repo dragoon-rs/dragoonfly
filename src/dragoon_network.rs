@@ -119,14 +119,13 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
-                // TODO
-                let sender = self
-                    .pending_start_providing
-                    .remove(&id)
-                    .expect("Completed query to be previously pending.");
-                info!("started providing {:?}", result_ok);
-                if sender.send(Ok(())).is_err() {
-                    error!("Cannot send result");
+                if let Some(sender) = self.pending_start_providing.remove(&id) {
+                    info!("started providing {:?}", result_ok);
+                    if sender.send(Ok(())).is_err() {
+                        error!("Cannot send result");
+                    }
+                } else {
+                    error!("could not find {} in the providers", id);
                 }
             }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
@@ -145,7 +144,7 @@ impl DragoonNetwork {
                                     error!("Cannot send result");
                                 }
                             } else {
-                                // TODO
+                                error!("could not find {} in the providers", id);
                             }
                         }
                         kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
@@ -155,16 +154,23 @@ impl DragoonNetwork {
                 } else {
                     info!("GetProviders returned an error");
                     if let Some(sender) = self.pending_get_providers.remove(&id) {
-                        if sender.send(Ok(HashSet::default())).is_err() {
-                            error!("Cannot send result");
+                        if let Some(mut query_id) =
+                            self.swarm.behaviour_mut().kademlia.query_mut(&id)
+                        {
+                            query_id.finish();
+                            if sender.send(Ok(HashSet::default())).is_err() {
+                                error!("Cannot send result");
+                            }
+                        } else {
+                            error!("could not find {} in the query ids", id);
+                            let err =
+                                ProviderError(format!("could not find {} in the query ids", id));
+                            if sender.send(Err(Box::new(err))).is_err() {
+                                error!("Cannot send result");
+                            }
                         }
-                        // TODO
-                        self.swarm
-                            .behaviour_mut()
-                            .kademlia
-                            .query_mut(&id)
-                            .unwrap()
-                            .finish();
+                    } else {
+                        error!("could not find {} in the providers", id);
                     }
                 }
             }

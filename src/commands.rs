@@ -292,16 +292,19 @@ pub(crate) async fn get_providers(
 
     match receiver.await {
         Err(e) => handle_canceled(e, &cmd_name),
-        Ok(providers) => (
-            StatusCode::OK,
-            Json(
-                providers
-                    .iter()
-                    .map(|peer| peer.to_base58())
-                    .collect::<Vec<String>>(),
-            ),
-        )
-            .into_response(),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(providers) => (
+                StatusCode::OK,
+                Json(
+                    providers
+                        .iter()
+                        .map(|peer| peer.to_base58())
+                        .collect::<Vec<String>>(),
+                ),
+            )
+                .into_response(),
+        },
     }
 }
 
