@@ -198,9 +198,7 @@ impl DragoonNetwork {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
                 request_response::Event::Message { message, .. },
             )) => match message {
-                request_response::Message::Request {
-                        ..
-                } => {
+                request_response::Message::Request { .. } => {
                     // FIXME: should do something there
                     // self.event_sender
                     //     .send()
