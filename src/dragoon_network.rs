@@ -5,8 +5,7 @@ use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::{
     core::Multiaddr,
-    kad,
-    identify,
+    identify, kad,
     multiaddr::Protocol,
     noise,
     request_response::{self, ProtocolSupport},
@@ -43,7 +42,7 @@ pub(crate) async fn create_swarm(
                 peer_id,
                 kad::store::MemoryStore::new(key.public().to_peer_id()),
             ),
-            identify:            identify::Behaviour::new(identify::Config::new(
+            identify: identify::Behaviour::new(identify::Config::new(
                 "/ipfs/id/1.0.0".to_string(),
                 key.public(),
             )),
@@ -55,7 +54,7 @@ pub(crate) async fn create_swarm(
                 request_response::Config::default(),
             ),
         })?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60*60)))
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60 * 60)))
         .build();
 
     swarm
@@ -174,18 +173,23 @@ impl DragoonNetwork {
                     }
                 }
             }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Sent { peer_id, .. })) => {
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Sent {
+                peer_id,
+                ..
+            })) => {
                 info!("Sent identify info to {peer_id:?}")
             }
             // Prints out the info received via the identify event
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Received {
+                peer_id,
+                info,
+            })) => {
                 info!("Received {info:?}");
-                self.swarm.behaviour_mut().kademlia.add_address(
-                    &peer_id,
-                    info.listen_addrs.get(0).unwrap().clone()
-                );
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&peer_id, info.listen_addrs.get(0).unwrap().clone());
                 info!("peer added");
-
             }
             // SwarmEvent::ConnectionEstablished { peer_id, endpoint, num_established, concurrent_dial_errors, established_in } => {
             //     match endpoint {
