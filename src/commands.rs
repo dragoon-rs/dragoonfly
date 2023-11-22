@@ -262,7 +262,10 @@ pub(crate) async fn add_peer(
 
     match receiver.await {
         Err(e) => handle_canceled(e, &cmd_name),
-        Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        },
     }
 }
 
@@ -277,7 +280,10 @@ pub(crate) async fn start_provide(
 
     match receiver.await {
         Err(e) => handle_canceled(e, &cmd_name),
-        Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        },
     }
 }
 
@@ -316,7 +322,10 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
 
     match receiver.await {
         Err(e) => handle_canceled(e, &cmd_name),
-        Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        },
     }
 }
 
