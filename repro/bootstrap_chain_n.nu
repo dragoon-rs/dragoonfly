@@ -14,9 +14,7 @@ log info "sleeping..."
 sleep 500ms
 
 log info "bootstrapping nodes"
-for node in $NODES {
-    app bootstrap --node $node
-    sleep 200ms
+for node in ($NODES | reverse) {
     app bootstrap --node $node
 }
 
