@@ -63,9 +63,10 @@ export def main [
         ^tmux split-window -h nu --execute $'
             use app.nu; app --start ($swarm.0.ip_port) --seed ($swarm.0.seed)
         '
-        $swarm | skip 1 | each {
+        $swarm | skip 1 | each {|it|
+            ^tmux select-layout even-vertical
             ^tmux split-window nu --execute $'
-                use app.nu; app --start ($in.ip_port) --seed ($in.seed)
+                use app.nu; app --start ($it.ip_port) --seed ($it.seed)
             '
         }
         ^tmux select-pane -t (^tmux list-panes -F "#{pane_id}" | lines | first)
