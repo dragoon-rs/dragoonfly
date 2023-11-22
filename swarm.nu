@@ -30,6 +30,11 @@ export def "swarm create" [
     null
 }
 
+# list the nodes of the swarm
+export def "swarm list" [] {
+    ps | where name =~ dragoonfly
+}
+
 # kill the swarm
 export def "swarm kill" [] {
     ps | where name =~ dragoonfly | each {|it|
