@@ -126,3 +126,11 @@ export def bootstrap [
     log debug $"bootstrapping ($node)"
     "bootstrap" | run-command $node
 }
+
+export def get [
+    key: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    log debug $"getting content of ($key) from ($node)"
+    $"get/($key)" | run-command $node
+}

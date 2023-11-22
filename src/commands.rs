@@ -69,6 +69,11 @@ pub(crate) enum DragoonCommand {
     Bootstrap {
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
+    Get {
+        key: String,
+        peer: PeerId,
+        sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -85,6 +90,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
+            DragoonCommand::Get { .. } => write!(f, "get"),
         }
     }
 }
@@ -327,6 +333,31 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
             Ok(_) => (StatusCode::OK, Json("")).into_response(),
         },
     }
+}
+
+pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+    let providers = {
+        let (sender, receiver) = oneshot::channel();
+        let cmd = DragoonCommand::GetProviders {
+            key: key.clone(),
+            sender,
+        };
+        send_command(cmd, state.clone()).await;
+
+        receiver.await.unwrap().unwrap()
+    };
+
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::Get {
+        key: key.clone(),
+        peer: *providers.into_iter().collect::<Vec<_>>().get(0).unwrap(),
+        sender,
+    };
+    send_command(cmd, state).await;
+
+    let file_content = receiver.await.unwrap().unwrap();
+
+    Json(file_content).into_response()
 }
 
 fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {

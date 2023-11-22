@@ -3,6 +3,7 @@ use futures::prelude::*;
 
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
+use libp2p::request_response::OutboundRequestId;
 use libp2p::{
     core::Multiaddr,
     identify, kad,
@@ -80,6 +81,8 @@ pub(crate) struct DragoonNetwork {
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_get_providers:
         HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
+    pending_request_file:
+        HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
 }
 
 impl DragoonNetwork {
@@ -93,6 +96,7 @@ impl DragoonNetwork {
             listeners: HashMap::new(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
+            pending_request_file: Default::default(),
         }
     }
 
@@ -191,19 +195,42 @@ impl DragoonNetwork {
                     .add_address(&peer_id, info.listen_addrs.get(0).unwrap().clone());
                 info!("peer added");
             }
-            // SwarmEvent::ConnectionEstablished { peer_id, endpoint, num_established, concurrent_dial_errors, established_in } => {
-            //     match endpoint {
-            //         ConnectedPoint::Listener { local_addr, send_back_addr } => {
-            //             self.swarm
-            //                 .behaviour_mut()
-            //                 .kademlia.bootstrap()
-            //                 .add_address(peer_id, )
-            //         }
-            //         ConnectedPoint::Dialer { address, role_override } => {
-            //             info!("connectionEstablished to {adrress:?}");
-            //         }
-            //     }
-            // }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
+                request_response::Event::Message { message, .. },
+            )) => match message {
+                request_response::Message::Request {
+                        ..
+                } => {
+                    // self.event_sender
+                    //     .send()
+                    //     .await
+                    //     .expect("Event receiver not to be dropped.");
+                }
+                request_response::Message::Response {
+                    request_id,
+                    response,
+                } => {
+                    let _ = self
+                        .pending_request_file
+                        .remove(&request_id)
+                        .expect("Request to still be pending.")
+                        .send(Ok(response.0));
+                }
+            },
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
+                request_response::Event::OutboundFailure {
+                    request_id, error, ..
+                },
+            )) => {
+                let _ = self
+                    .pending_request_file
+                    .remove(&request_id)
+                    .expect("Request to still be pending.")
+                    .send(Err(Box::new(error)));
+            }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
+                request_response::Event::ResponseSent { .. },
+            )) => {}
             e => info!("{e:?}"),
         }
     }
@@ -399,6 +426,14 @@ impl DragoonNetwork {
                         }
                     }
                 }
+            }
+            DragoonCommand::Get { key, peer, sender } => {
+                let request_id = self
+                    .swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_request(&peer, FileRequest(key));
+                self.pending_request_file.insert(request_id, sender);
             }
         }
     }
