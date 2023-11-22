@@ -13,7 +13,7 @@ pub enum DragoonError {
     UnexpectedError,
     #[error("Could not provide")]
     ProviderError(String),
-    #[error("Bootstrap errro")]
+    #[error("Bootstrap error")]
     BootstrapError(String),
 }
 
