@@ -20,6 +20,7 @@ use std::time::Duration;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
+use crate::dragoon::Behaviour;
 use crate::error::DragoonError::{BadListener, BootstrapError, DialError, ProviderError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +55,7 @@ pub(crate) async fn create_swarm(
                 )],
                 request_response::Config::default(),
             ),
+            dragoon: Behaviour::new("/dragoon/1.0.0".to_string(), key.public())
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60*60)))
         .build();
@@ -71,6 +73,7 @@ pub(crate) struct DragoonBehaviour {
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
     identify: identify::Behaviour,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
+    dragoon: Behaviour,
 }
 
 pub(crate) struct DragoonNetwork {
