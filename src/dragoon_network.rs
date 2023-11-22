@@ -228,13 +228,8 @@ impl DragoonNetwork {
                     }
                 } else {
                     error!("cannot parse addr {}", multiaddr);
-                    if sender
-                        .send(Err(Box::new(BadListener(format!(
-                            "could not parse {}",
-                            multiaddr
-                        )))))
-                        .is_err()
-                    {
+                    let err = BadListener(format!("could not parse {}", multiaddr));
+                    if sender.send(Err(Box::new(err))).is_err() {
                         error!("Cannot send result");
                     }
                 }
@@ -282,13 +277,8 @@ impl DragoonNetwork {
                     }
                 } else {
                     error!("could not find listener");
-                    if sender
-                        .send(Err(Box::new(BadListener(format!(
-                            "listener {} not found",
-                            listener_id
-                        )))))
-                        .is_err()
-                    {
+                    let err = BadListener(format!("listener {} not found", listener_id));
+                    if sender.send(Err(Box::new(err))).is_err() {
                         error!("Cannot send result");
                     }
                 }
@@ -318,23 +308,16 @@ impl DragoonNetwork {
                         Err(de) => {
                             error!("error: {}", de);
 
-                            if sender
-                                .send(Err(Box::new(DialError(de.to_string()))))
-                                .is_err()
-                            {
+                            let err = DialError(de.to_string());
+                            if sender.send(Err(Box::new(err))).is_err() {
                                 error!("Cannot send result");
                             }
                         }
                     }
                 } else {
                     error!("cannot parse addr {}", multiaddr);
-                    if sender
-                        .send(Err(Box::new(BadListener(format!(
-                            "could not parse {}",
-                            multiaddr
-                        )))))
-                        .is_err()
-                    {
+                    let err = BadListener(format!("could not parse {}", multiaddr));
+                    if sender.send(Err(Box::new(err))).is_err() {
                         error!("Cannot send result");
                     }
                 }
@@ -350,13 +333,8 @@ impl DragoonNetwork {
                     }
                 } else {
                     error!("cannot parse addr {}", multiaddr);
-                    if sender
-                        .send(Err(Box::new(BadListener(format!(
-                            "could not parse {}",
-                            multiaddr
-                        )))))
-                        .is_err()
-                    {
+                    let err = BadListener(format!("could not parse {}", multiaddr));
+                    if sender.send(Err(Box::new(err))).is_err() {
                         error!("Cannot send result");
                     }
                 }
