@@ -32,7 +32,7 @@ for node in $NODES {
 }
 
 app start-provide "foo" --node $NODES.0
-print (app get-providers "foo" --node $NODES.3)
-
 app start-provide "bar" --node $NODES.3
+
+print (app get-providers "foo" --node $NODES.3)
 print (app get-providers "bar" --node $NODES.0)
