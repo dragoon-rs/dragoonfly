@@ -79,7 +79,8 @@ pub(crate) struct DragoonNetwork {
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing:
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
-    pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
+    pending_get_providers:
+        HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
 }
 
 impl DragoonNetwork {
@@ -118,12 +119,15 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
+                // TODO
                 let sender = self
                     .pending_start_providing
                     .remove(&id)
                     .expect("Completed query to be previously pending.");
                 info!("started providing {:?}", result_ok);
-                let _ = sender.send(Ok(()));
+                if sender.send(Ok(())).is_err() {
+                    error!("Cannot send result");
+                }
             }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
@@ -137,7 +141,11 @@ impl DragoonNetwork {
                         kad::GetProvidersOk::FoundProviders { providers, .. } => {
                             info!("Found providers {providers:?}");
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                sender.send(providers).expect("Receiver not to be dropped");
+                                if sender.send(Ok(providers)).is_err() {
+                                    error!("Cannot send result");
+                                }
+                            } else {
+                                // TODO
                             }
                         }
                         kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
@@ -147,9 +155,10 @@ impl DragoonNetwork {
                 } else {
                     info!("GetProviders returned an error");
                     if let Some(sender) = self.pending_get_providers.remove(&id) {
-                        sender
-                            .send(HashSet::default())
-                            .expect("Receiver not to be dropped");
+                        if sender.send(Ok(HashSet::default())).is_err() {
+                            error!("Cannot send result");
+                        }
+                        // TODO
                         self.swarm
                             .behaviour_mut()
                             .kademlia

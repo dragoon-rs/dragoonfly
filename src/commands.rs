@@ -64,10 +64,10 @@ pub(crate) enum DragoonCommand {
     },
     GetProviders {
         key: String,
-        sender: oneshot::Sender<HashSet<PeerId>>,
+        sender: oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>,
     },
     Bootstrap {
-        sender: oneshot::Sender<()>,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
 }
 
