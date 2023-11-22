@@ -1,76 +1,78 @@
-use futures::channel::oneshot;
-use libp2p::futures::channel::mpsc;
-use libp2p::futures::StreamExt;
-use libp2p::{request_response, TransportError};
-use libp2p_core::identity::Keypair;
-use libp2p_core::multiaddr::Protocol;
-use libp2p_core::transport::ListenerId;
-use libp2p_core::{Multiaddr, PeerId};
-use libp2p_kad::store::MemoryStore;
-use libp2p_kad::{GetProvidersOk, Kademlia, KademliaEvent, QueryId, QueryResult};
-use libp2p_request_response::ProtocolSupport;
-use libp2p_swarm::derive_prelude::Either;
-use libp2p_swarm::{ConnectionHandlerUpgrErr, NetworkBehaviour, Swarm, SwarmEvent};
+use futures::channel::{mpsc, oneshot};
+use futures::prelude::*;
+
+use libp2p::core::transport::ListenerId;
+use libp2p::identity::Keypair;
+use libp2p::{
+    core::Multiaddr,
+    kad,
+    multiaddr::Protocol,
+    noise,
+    request_response::{self, ProtocolSupport},
+    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
+    tcp, yamux, PeerId, StreamProtocol, TransportError,
+};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::iter;
-use tokio::io;
+use std::time::Duration;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
-use crate::dragoon_protocol::{DragoonCodec, DragoonProtocol, FileRequest, FileResponse};
 use crate::error::DragoonError::{BadListener, DialError};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileRequest(String);
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct FileResponse(Vec<u8>);
 
 pub(crate) async fn create_swarm(
     id_keys: Keypair,
 ) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
     let peer_id = id_keys.public().to_peer_id();
-    let swarm = Swarm::with_threadpool_executor(
-        libp2p::development_transport(id_keys).await?,
-        DragoonBehaviour {
-            kademlia: Kademlia::new(peer_id, MemoryStore::new(peer_id)),
-            request_response: request_response::Behaviour::new(
-                DragoonCodec(),
-                iter::once((DragoonProtocol(), ProtocolSupport::Full)),
-                Default::default(),
+    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
+        .with_async_std()
+        .with_tcp(
+            tcp::Config::default(),
+            noise::Config::new,
+            yamux::Config::default,
+        )?
+        .with_behaviour(|key| DragoonBehaviour {
+            kademlia: kad::Behaviour::new(
+                peer_id,
+                kad::store::MemoryStore::new(key.public().to_peer_id()),
             ),
-        },
-        peer_id,
-    );
+            request_response: request_response::cbor::Behaviour::new(
+                [(
+                    StreamProtocol::new("/file-exchange/1"),
+                    ProtocolSupport::Full,
+                )],
+                request_response::Config::default(),
+            ),
+        })?
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        .build();
+
+    swarm
+        .behaviour_mut()
+        .kademlia
+        .set_mode(Some(kad::Mode::Server));
+
     Ok(swarm)
 }
 
 #[derive(NetworkBehaviour)]
-#[behaviour(out_event = "DragoonEvent")]
 pub(crate) struct DragoonBehaviour {
-    request_response: request_response::Behaviour<DragoonCodec>,
-    kademlia: Kademlia<MemoryStore>,
-}
-
-#[derive(Debug)]
-pub(crate) enum DragoonEvent {
-    RequestResponse(request_response::Event<FileRequest, FileResponse>),
-    Kademlia(KademliaEvent),
-}
-
-impl From<request_response::Event<FileRequest, FileResponse>> for DragoonEvent {
-    fn from(event: request_response::Event<FileRequest, FileResponse>) -> Self {
-        DragoonEvent::RequestResponse(event)
-    }
-}
-
-impl From<KademliaEvent> for DragoonEvent {
-    fn from(event: KademliaEvent) -> Self {
-        DragoonEvent::Kademlia(event)
-    }
+    request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
+    kademlia: kad::Behaviour<kad::store::MemoryStore>,
 }
 
 pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
-    pending_start_providing: HashMap<QueryId, oneshot::Sender<()>>,
-    pending_get_providers: HashMap<QueryId, oneshot::Sender<HashSet<PeerId>>>,
+    pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
+    pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
 }
 
 impl DragoonNetwork {
@@ -100,15 +102,12 @@ impl DragoonNetwork {
         }
     }
 
-    async fn handle_event(
-        &mut self,
-        event: SwarmEvent<DragoonEvent, Either<ConnectionHandlerUpgrErr<io::Error>, io::Error>>,
-    ) {
+    async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent>) {
         match event {
-            SwarmEvent::Behaviour(DragoonEvent::Kademlia(
-                KademliaEvent::OutboundQueryProgressed {
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
+                kad::Event::OutboundQueryProgressed {
                     id,
-                    result: QueryResult::StartProviding(Ok(result_ok)),
+                    result: kad::QueryResult::StartProviding(Ok(result_ok)),
                     ..
                 },
             )) => {
@@ -119,22 +118,22 @@ impl DragoonNetwork {
                 info!("started providing {:?}", result_ok);
                 let _ = sender.send(());
             }
-            SwarmEvent::Behaviour(DragoonEvent::Kademlia(
-                KademliaEvent::OutboundQueryProgressed {
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
+                kad::Event::OutboundQueryProgressed {
                     id,
-                    result: QueryResult::GetProviders(get_providers_result),
+                    result: kad::QueryResult::GetProviders(get_providers_result),
                     ..
                 },
             )) => {
                 if let Ok(res) = get_providers_result {
                     match res {
-                        GetProvidersOk::FoundProviders { providers, .. } => {
+                        kad::GetProvidersOk::FoundProviders { providers, .. } => {
                             info!("Found providers {providers:?}");
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
                                 sender.send(providers).expect("Receiver not to be dropped");
                             }
                         }
-                        GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                        kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
                             info!("Finished get providers {closest_peers:?}");
                         }
                     }
@@ -325,23 +324,9 @@ impl DragoonNetwork {
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
                     info!("adding peer {} from {}", addr, multiaddr);
                     if let Some(Protocol::P2p(hash)) = addr.iter().last() {
-                        match PeerId::from_multihash(hash) {
-                            Ok(peer_id) => {
-                                self.swarm
-                                    .behaviour_mut()
-                                    .kademlia
-                                    .add_address(&peer_id, addr);
-                                if sender.send(Ok(())).is_err() {
-                                    error!("could not send result");
-                                }
-                            }
-                            Err(multihash) => {
-                                error!("not a hash {:?}", multihash);
-                                let err = BadListener(format!("not a hash {:?}", multihash));
-                                if sender.send(Err(Box::new(err))).is_err() {
-                                    error!("Cannot send result");
-                                }
-                            }
+                        self.swarm.behaviour_mut().kademlia.add_address(&hash, addr);
+                        if sender.send(Ok(())).is_err() {
+                            error!("could not send result");
                         }
                     }
                 } else {

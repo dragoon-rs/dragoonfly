@@ -3,9 +3,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
-use libp2p_core::Multiaddr;
-use libp2p_core::PeerId;
-use libp2p_swarm::NetworkInfo;
+use libp2p::swarm::NetworkInfo;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
@@ -69,7 +68,7 @@ pub(crate) enum DragoonCommand {
     },
     Bootstrap {
         sender: oneshot::Sender<()>,
-    }
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -313,11 +312,8 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
     send_command(cmd, state).await;
 
     match receiver.await {
-            Err(e) => handle_canceled(e, &cmd_name),
-            Ok(_) => (
-                StatusCode::OK,
-                Json(""),
-            ).into_response(),
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(_) => (StatusCode::OK, Json("")).into_response(),
     }
 }
 

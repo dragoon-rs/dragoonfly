@@ -1,14 +1,13 @@
 mod app;
 mod commands;
 mod dragoon_network;
-mod dragoon_protocol;
 mod error;
-
-use libp2p_core::identity::{ed25519, Keypair};
 
 use axum::routing::get;
 use axum::Router;
 use futures::channel::mpsc;
+use libp2p::identity;
+use libp2p::identity::Keypair;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -73,7 +72,5 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
 fn get_keypair(seed: u8) -> Keypair {
     let mut bytes = [0u8; 32];
     bytes[0] = seed;
-    let secret_key =
-        ed25519::SecretKey::from_bytes(&mut bytes).expect("Cannot convert bytes to SecretKey.");
-    Keypair::Ed25519(secret_key.into())
+    identity::Keypair::ed25519_from_bytes(bytes).unwrap()
 }
