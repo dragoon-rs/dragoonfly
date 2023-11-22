@@ -56,6 +56,7 @@ export def main [
     } else if $spawn_swarm_with_tmux != null and ($swarm | is-empty | not $in) {
         ^tmux new-window nu --execute $'
             $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
+            $env.NU_LOG_LEVEL = "DEBUG"
             use app.nu
             const SWARM = ($swarm | to nuon)
         '
