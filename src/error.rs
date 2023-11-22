@@ -11,6 +11,8 @@ pub enum DragoonError {
     DialError(String),
     #[error("unexpected error from Dragoon")]
     UnexpectedError,
+    #[error("Could not provide")]
+    ProviderError(String),
 }
 
 impl IntoResponse for DragoonError {
@@ -21,6 +23,9 @@ impl IntoResponse for DragoonError {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
             DragoonError::DialError(ref msg) => {
+                (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
+            }
+            DragoonError::ProviderError(ref msg) => {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
         };
