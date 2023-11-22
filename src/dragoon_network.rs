@@ -20,7 +20,7 @@ use std::time::Duration;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
-use crate::error::DragoonError::{BadListener, DialError, ProviderError};
+use crate::error::DragoonError::{BadListener, BootstrapError, DialError, ProviderError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
@@ -365,10 +365,20 @@ impl DragoonNetwork {
                 self.pending_get_providers.insert(query_id, sender);
             }
             DragoonCommand::Bootstrap { sender } => {
-                self.swarm.behaviour_mut().kademlia.bootstrap().unwrap();
+                match self.swarm.behaviour_mut().kademlia.bootstrap() {
+                    Ok(_) => {
+                        if sender.send(Ok(())).is_err() {
+                            error!("could not send result");
+                        }
+                    }
+                    Err(nkp) => {
+                        error!("error: {}", nkp);
 
-                if sender.send(()).is_err() {
-                    error!("could not send result");
+                        let err = BootstrapError(nkp.to_string());
+                        if sender.send(Err(Box::new(err))).is_err() {
+                            error!("Cannot send result");
+                        }
+                    }
                 }
             }
         }
