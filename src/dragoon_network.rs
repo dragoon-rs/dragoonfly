@@ -20,7 +20,7 @@ use std::time::Duration;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
-use crate::error::DragoonError::{BadListener, DialError};
+use crate::error::DragoonError::{BadListener, DialError, ProviderError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
@@ -77,7 +77,8 @@ pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
-    pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
+    pending_start_providing:
+        HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
 }
 
@@ -117,12 +118,12 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
-                let sender: oneshot::Sender<()> = self
+                let sender = self
                     .pending_start_providing
                     .remove(&id)
                     .expect("Completed query to be previously pending.");
                 info!("started providing {:?}", result_ok);
-                let _ = sender.send(());
+                let _ = sender.send(Ok(()));
             }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
@@ -344,9 +345,15 @@ impl DragoonNetwork {
                     .swarm
                     .behaviour_mut()
                     .kademlia
-                    .start_providing(key.into_bytes().into())
+                    .start_providing(key.clone().into_bytes().into())
                 {
                     self.pending_start_providing.insert(query_id, sender);
+                } else {
+                    error!("cannot provide {}", key);
+                    let err = ProviderError(format!("could not provide {}", key));
+                    if sender.send(Err(Box::new(err))).is_err() {
+                        error!("Cannot send result");
+                    }
                 }
             }
             DragoonCommand::GetProviders { key, sender } => {

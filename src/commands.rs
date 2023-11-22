@@ -60,7 +60,7 @@ pub(crate) enum DragoonCommand {
     },
     StartProvide {
         key: String,
-        sender: oneshot::Sender<()>,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
     GetProviders {
         key: String,
