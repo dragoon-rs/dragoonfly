@@ -62,6 +62,8 @@ def parse-log [--id: int]: string -> table<date: datetime, level: string, id: in
 }
 
 export def "swarm log" []: nothing -> table<date: datetime, level: string, id: int, file: string, msg: string> {
+    # FIXME: this should not require `mut`
+    # related to https://github.com/nushell/nushell/issues/10428
     mut logs = []
     for id in (seq 0 (swarm list | length | $in - 1)) {
         let log = $env.SWARM_LOG_DIR | path join $"($id).log" | open $in --raw | parse-log --id $id
