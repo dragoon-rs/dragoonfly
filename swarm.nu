@@ -55,7 +55,8 @@ export def "swarm list" []: nothing -> table {
 def parse-log [--id: int]: string -> table<date: datetime, level: string, id: int, file: string, msg: string> {
      lines
         | ansi strip
-        | parse "{date}  {level} {file}: {msg}"
+        | parse --regex '^(?<date>.{27}) (?<level>.{5}) (?<file>[\w:_-]*): (?<msg>.*)'
+        | str trim level
         | insert id $id
         | into datetime date
         | move id --before file
