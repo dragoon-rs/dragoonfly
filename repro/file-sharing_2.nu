@@ -19,3 +19,4 @@ app bootstrap --node $NODES.0
 app start-provide "foo" --node $NODES.0
 app add-file "this is foo" --node $NODES.0
 print (app get-providers "foo" --node $NODES.1)
+print (app get "foo" --node $NODES.1)
