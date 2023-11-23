@@ -3,7 +3,7 @@ use futures::prelude::*;
 
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
-use libp2p::request_response::OutboundRequestId;
+use libp2p::request_response::{OutboundRequestId, ResponseChannel};
 use libp2p::{
     core::Multiaddr,
     identify, kad,
@@ -66,6 +66,14 @@ pub(crate) async fn create_swarm(
     Ok(swarm)
 }
 
+#[derive(Debug)]
+pub(crate) enum Event {
+    InboundRequest {
+        request: String,
+        channel: ResponseChannel<FileResponse>,
+    },
+}
+
 #[derive(NetworkBehaviour)]
 pub(crate) struct DragoonBehaviour {
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
@@ -76,6 +84,7 @@ pub(crate) struct DragoonBehaviour {
 pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
+    event_sender: mpsc::Sender<Event>,
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing:
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
@@ -89,10 +98,12 @@ impl DragoonNetwork {
     pub fn new(
         swarm: Swarm<DragoonBehaviour>,
         command_receiver: mpsc::Receiver<DragoonCommand>,
+        event_sender: mpsc::Sender<Event>,
     ) -> Self {
         Self {
             swarm,
             command_receiver,
+            event_sender,
             listeners: HashMap::new(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
@@ -201,6 +212,7 @@ impl DragoonNetwork {
                 request_response::Message::Request {
                     request, channel, ..
                 } => {
+                    info!("request");
                     self.event_sender
                         .send(Event::InboundRequest {
                             request: request.0,
@@ -213,6 +225,7 @@ impl DragoonNetwork {
                     request_id,
                     response,
                 } => {
+                    info!("response");
                     let _ = self
                         .pending_request_file
                         .remove(&request_id)

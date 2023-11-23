@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
+use futures::channel::mpsc;
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
 use libp2p::request_response::ResponseChannel;
@@ -13,7 +14,7 @@ use std::sync::Arc;
 use tracing::error;
 
 use crate::app::AppState;
-use crate::dragoon_network::FileResponse;
+use crate::dragoon_network::{Event, FileResponse};
 use crate::error::DragoonError;
 
 // Potential other commands:
@@ -368,6 +369,25 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
     let file_content = receiver.await.unwrap().unwrap();
 
     Json(file_content).into_response()
+}
+
+pub(crate) async fn add_file(
+    content: &[u8],
+    mut event_receiver: mpsc::Receiver<Event>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    loop {
+        match event_receiver.try_next() {
+            Ok(Some(Event::InboundRequest { channel, .. })) => {
+                let cmd = DragoonCommand::AddFile {
+                    file: content.to_vec(),
+                    channel,
+                };
+                send_command(cmd, state.clone()).await;
+            }
+            e => todo!("{:?}", e),
+        }
+    }
 }
 
 fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {

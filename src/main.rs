@@ -21,6 +21,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);
+    let (event_sender, event_receiver) = mpsc::channel(0);
 
     let app = Router::new()
         .route("/listen/:addr", get(commands::listen))
@@ -35,6 +36,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/get-providers/:key", get(commands::get_providers))
         .route("/bootstrap", get(commands::bootstrap))
         .route("/get/:key", get(commands::get))
+        .route("/add-file/:content", get(commands::add_file))
         .with_state(Arc::new(app::AppState::new(cmd_sender)));
 
     let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {
@@ -58,7 +60,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     info!("Peer id: {} {}", kp.public().to_peer_id(), id);
 
     let swarm = dragoon_network::create_swarm(kp).await?;
-    let network = DragoonNetwork::new(swarm, cmd_receiver);
+    let network = DragoonNetwork::new(swarm, cmd_receiver, event_sender);
     tokio::spawn(network.run());
 
     let shutdown = signal::ctrl_c();
