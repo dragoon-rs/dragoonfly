@@ -371,7 +371,7 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
 }
 
 pub(crate) async fn add_file(
-    Path(content): Path<&[u8]>,
+    Path(content): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let mut event_receiver = state.event_receiver.lock().await;
@@ -380,7 +380,7 @@ pub(crate) async fn add_file(
         match event_receiver.try_next() {
             Ok(Some(Event::InboundRequest { channel, .. })) => {
                 let cmd = DragoonCommand::AddFile {
-                    file: content.to_vec(),
+                    file: content.as_bytes().to_vec(),
                     channel,
                 };
                 send_command(cmd, state.clone()).await;
