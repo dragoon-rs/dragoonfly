@@ -77,7 +77,7 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
 # kill the swarm
 export def "swarm kill" []: nothing -> nothing {
     ps | where name =~ $NAME | each {|it|
-        print $"killing ($it.pid)"
+        log warning $"killing ($it.pid)"
         kill $it.pid
     }
 
