@@ -38,8 +38,9 @@ export def "swarm run" [
     ^$nu.current-exe --execute $'
        $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
        $env.NU_LOG_LEVEL = "DEBUG"
+       $env.SWARM_LOG_DIR = ($log_dir)
        use app.nu
-       use swarm.nu ["swarm kill", "swarm list"]
+       use swarm.nu ["swarm kill", "swarm list", "swarm log"]
        const SWARM = ($swarm | to nuon)
     '
 
@@ -49,6 +50,22 @@ export def "swarm run" [
 # list the nodes of the swarm
 export def "swarm list" []: nothing -> table {
     ps | where name =~ $NAME
+}
+
+export def "swarm log" [id: int]: nothing -> string {
+    let log_file = $env.SWARM_LOG_DIR | path join $"($id).log"
+
+    if not ($log_file | path exists) {
+        error make {
+            msg: $"(ansi red_bold)invalid_node_id(ansi reset)"
+            label: {
+                text: $"expected an id between 0 and (swarm list | length | $in - 1), found ($id)"
+                span: (metadata $id).span
+            }
+        }
+    }
+
+    open $log_file
 }
 
 # kill the swarm
