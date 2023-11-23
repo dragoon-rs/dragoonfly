@@ -1,7 +1,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use futures::channel::mpsc;
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
 use libp2p::request_response::ResponseChannel;
@@ -372,10 +371,11 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
 }
 
 pub(crate) async fn add_file(
-    content: &[u8],
-    mut event_receiver: mpsc::Receiver<Event>,
+    Path(content): Path<&[u8]>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    let mut event_receiver = state.event_receiver.lock().await;
+
     loop {
         match event_receiver.try_next() {
             Ok(Some(Event::InboundRequest { channel, .. })) => {

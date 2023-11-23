@@ -37,7 +37,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/bootstrap", get(commands::bootstrap))
         .route("/get/:key", get(commands::get))
         .route("/add-file/:content", get(commands::add_file))
-        .with_state(Arc::new(app::AppState::new(cmd_sender)));
+        .with_state(Arc::new(app::AppState::new(cmd_sender, event_receiver)));
 
     let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {
         ip_port
