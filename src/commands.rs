@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::app::AppState;
 use crate::dragoon_network::{Event, FileResponse};
@@ -376,14 +376,23 @@ pub(crate) async fn add_file(
 ) -> Response {
     let mut event_receiver = state.event_receiver.lock().await;
 
+    // FIXME: use a proper name
+    let name = "foo";
+
+    info!("trying to add a file");
+
     loop {
         match event_receiver.try_next() {
-            Ok(Some(Event::InboundRequest { channel, .. })) => {
-                let cmd = DragoonCommand::AddFile {
-                    file: content.as_bytes().to_vec(),
-                    channel,
-                };
-                send_command(cmd, state.clone()).await;
+            Ok(Some(Event::InboundRequest { channel, request })) => {
+                info!("request: {}", request);
+                if request == name {
+                    info!("request accepted");
+                    let cmd = DragoonCommand::AddFile {
+                        file: content.as_bytes().to_vec(),
+                        channel,
+                    };
+                    send_command(cmd, state.clone()).await;
+                }
             }
             e => todo!("{:?}", e),
         }
