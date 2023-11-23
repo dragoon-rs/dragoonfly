@@ -57,7 +57,8 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(http_server);
 
     let kp = get_keypair(id);
-    info!("Peer id: {} {}", kp.public().to_peer_id(), id);
+    info!("IP/port: {}", ip_port);
+    info!("Peer ID: {} ({})", kp.public().to_peer_id(), id);
 
     let swarm = dragoon_network::create_swarm(kp).await?;
     let network = DragoonNetwork::new(swarm, cmd_receiver, event_sender);

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{error, info, debug};
 
 use crate::app::AppState;
 use crate::dragoon_network::{Event, FileResponse};
@@ -106,6 +106,7 @@ pub(crate) async fn listen(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `listen`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::Listen { multiaddr, sender };
@@ -122,6 +123,7 @@ pub(crate) async fn listen(
 }
 
 pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `get_listeners`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::GetListeners { sender };
@@ -138,6 +140,7 @@ pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Respons
 }
 
 pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `get_peer_id`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::GetPeerId { sender };
@@ -166,6 +169,7 @@ struct SerNetworkInfo {
 }
 
 pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `get_network_info`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::GetNetworkInfo { sender };
@@ -201,6 +205,7 @@ pub(crate) async fn remove_listener(
     Path(listener_id): Path<u64>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `remove_listener`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::RemoveListener {
@@ -220,6 +225,7 @@ pub(crate) async fn remove_listener(
 }
 
 pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `get_connected_peers`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::GetConnectedPeers { sender };
@@ -248,6 +254,7 @@ pub(crate) async fn dial(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `dial`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::Dial { multiaddr, sender };
@@ -267,6 +274,7 @@ pub(crate) async fn add_peer(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `add_peer`");
     let (sender, receiver) = oneshot::channel();
 
     let cmd = DragoonCommand::AddPeer { multiaddr, sender };
@@ -286,6 +294,7 @@ pub(crate) async fn start_provide(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `start_provide`");
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::StartProvide { key, sender };
     let cmd_name = cmd.to_string();
@@ -304,6 +313,7 @@ pub(crate) async fn get_providers(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `get_providers`");
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::GetProviders { key, sender };
     let cmd_name = cmd.to_string();
@@ -328,6 +338,7 @@ pub(crate) async fn get_providers(
 }
 
 pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `bootstrap`");
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::Bootstrap { sender };
     let cmd_name = cmd.to_string();
@@ -343,6 +354,7 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
 }
 
 pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `get`");
     let providers = {
         let (sender, receiver) = oneshot::channel();
         let cmd = DragoonCommand::GetProviders {
@@ -374,6 +386,7 @@ pub(crate) async fn add_file(
     Path(content): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    info!("running command `add_file`");
     let mut event_receiver = state.event_receiver.lock().await;
 
     // FIXME: use a proper name
@@ -382,9 +395,9 @@ pub(crate) async fn add_file(
     loop {
         match event_receiver.try_next() {
             Ok(Some(Event::InboundRequest { channel, request })) => {
-                info!("request: {}", request);
+                debug!("add_file: request '{}'", request);
                 if request == name {
-                    info!("request accepted");
+                    debug!("add_file: request accepted");
                     let cmd = DragoonCommand::AddFile {
                         file: content.as_bytes().to_vec(),
                         channel,
@@ -401,14 +414,14 @@ fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {
     if let Ok(dragoon_error) = err.downcast::<DragoonError>() {
         dragoon_error.into_response()
     } else {
-        error!("cannot get return message from command {}", command);
+        error!("Could not get return message from command `{}`", command);
         DragoonError::UnexpectedError.into_response()
     }
 }
 
 fn handle_canceled(err: Canceled, command: &str) -> Response {
     error!(
-        "Cannot receive a return from command {}: {:?}",
+        "Could not receive a return from command `{}`: {:?}",
         command, err
     );
     DragoonError::UnexpectedError.into_response()
@@ -419,10 +432,10 @@ async fn send_command(command: DragoonCommand, state: Arc<AppState>) -> Option<R
 
     let cmd_name = format!("{}", command);
 
-    warn!("sending {}", command);
+    info!("Sending command `{:?}`", command);
 
     if let Err(e) = cmd_sender.send(command).await {
-        error!("Cannot send command {}: {:?}", cmd_name, e);
+        error!("Could not send command `{}`: {:?}", cmd_name, e);
         return Some(DragoonError::UnexpectedError.into_response());
     }
 

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::commands::DragoonCommand;
 use crate::error::DragoonError::{BadListener, BootstrapError, DialError, ProviderError};
@@ -125,6 +125,7 @@ impl DragoonNetwork {
     }
 
     async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent>) {
+        debug!("[event] {:?}", event);
         match event {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
@@ -133,14 +134,13 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
-                warn!("OutboundQueryProgressed(StartProviding): id = {}", id);
                 if let Some(sender) = self.pending_start_providing.remove(&id) {
-                    info!("started providing {:?}", result_ok);
+                    info!("Started providing {:?}", result_ok);
                     if sender.send(Ok(())).is_err() {
-                        error!("Cannot send result");
+                        error!("Could not send result");
                     }
                 } else {
-                    error!("could not find {} in the providers", id);
+                    error!("Could not find id = {} in the providers", id);
                 }
             }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
@@ -150,11 +150,10 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
-                warn!("OutboundQueryProgressed(GetProviders): id = {}", id);
                 if let Ok(res) = get_providers_result {
                     match res {
                         kad::GetProvidersOk::FoundProviders { providers, .. } => {
-                            info!("Found providers {providers:?}");
+                            info!("Found providers {:?}", providers);
                             if let Some(sender) = self.pending_get_providers.remove(&id) {
                                 if sender.send(Ok(providers)).is_err() {
                                     error!("Cannot send result");
@@ -168,7 +167,7 @@ impl DragoonNetwork {
                         }
                     }
                 } else {
-                    info!("GetProviders returned an error");
+                    info!("Could not get the providers");
                     if let Some(sender) = self.pending_get_providers.remove(&id) {
                         if let Some(mut query_id) =
                             self.swarm.behaviour_mut().kademlia.query_mut(&id)
@@ -193,20 +192,17 @@ impl DragoonNetwork {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Sent {
                 peer_id,
                 ..
-            })) => {
-                info!("Sent identify info to {peer_id:?}")
-            }
-            // Prints out the info received via the identify event
+            })) => info!("Sent identify info to {}", peer_id),
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Received {
                 peer_id,
                 info,
             })) => {
-                info!("Received {info:?}");
+                info!("Received identify info '{:?}' from {}", info, peer_id);
                 self.swarm
                     .behaviour_mut()
                     .kademlia
                     .add_address(&peer_id, info.listen_addrs.get(0).unwrap().clone());
-                info!("peer added");
+                info!("Added peer {}", peer_id);
             }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
                 request_response::Event::Message { message, .. },
@@ -214,7 +210,7 @@ impl DragoonNetwork {
                 request_response::Message::Request {
                     request, channel, ..
                 } => {
-                    warn!("RequestResponse(Request): request = {:?}", request);
+                    debug!("Sending inbound request '{}'", request.0);
                     self.event_sender
                         .send(Event::InboundRequest {
                             request: request.0,
@@ -227,12 +223,16 @@ impl DragoonNetwork {
                     request_id,
                     response,
                 } => {
-                    warn!("RequestResponse(Response): request_id = {:?}", request_id);
-                    let _ = self
+                    debug!("Preparing response from request {}", request_id);
+                    let sender = self
                         .pending_request_file
                         .remove(&request_id)
-                        .expect("Request to still be pending.")
-                        .send(Ok(response.0));
+                        .expect("Request to still be pending.");
+
+                    debug!("Sending response {:?}", response);
+                    sender
+                        .send(Ok(response.0))
+                        .expect("Could not send response");
                 }
             },
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
@@ -240,28 +240,25 @@ impl DragoonNetwork {
                     request_id, error, ..
                 },
             )) => {
-                warn!("RequestResponse(OutboundFailure): request_id = {:?}", request_id);
+                debug!("Request {} failed with {}", request_id, error);
                 let _ = self
                     .pending_request_file
                     .remove(&request_id)
                     .expect("Request to still be pending.")
                     .send(Err(Box::new(error)));
             }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
-                request_response::Event::ResponseSent { .. },
-            )) => {}
-            e => info!("{e:?}"),
+            e => warn!("[unknown event] {:?}", e),
         }
     }
 
     async fn handle_command(&mut self, cmd: DragoonCommand) {
+        debug!("[cmd] {:?}", cmd);
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
-                warn!("DragoonCommand::listen: listen_on({})", multiaddr);
                 if let Ok(addr) = multiaddr.parse() {
                     match self.swarm.listen_on(addr) {
                         Ok(listener_id) => {
-                            info!("listening on {}", multiaddr);
+                            info!("Listening on {}", multiaddr);
 
                             let id = regex::Regex::new(r"ListenerId\((\d+)\)")
                                 .unwrap()
@@ -275,7 +272,7 @@ impl DragoonNetwork {
                             self.listeners.insert(id, listener_id);
 
                             if sender.send(Ok(id)).is_err() {
-                                error!("could not send listener ID");
+                                error!("Could not send listener ID");
                             }
                         }
                         Err(te) => {
@@ -289,21 +286,20 @@ impl DragoonNetwork {
                             error!("{}", err_msg);
 
                             if sender.send(Err(Box::new(BadListener(err_msg)))).is_err() {
-                                error!("Cannot send result");
+                                error!("Could not send result");
                             }
                         }
                     }
                 } else {
-                    error!("cannot parse addr {}", multiaddr);
-                    let err = BadListener(format!("could not parse {}", multiaddr));
+                    error!("Could not parse addr {}", multiaddr);
+                    let err = BadListener(format!("Could not parse {}", multiaddr));
                     if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
+                        error!("Could not send result");
                     }
                 }
             }
             DragoonCommand::GetListeners { sender } => {
-                warn!("DragoonCommand::GetListeners: listeners()");
-                info!("getting listeners");
+                info!("Getting listeners");
                 let listeners = self
                     .swarm
                     .listeners()
@@ -312,54 +308,46 @@ impl DragoonNetwork {
                     .collect::<Vec<Multiaddr>>();
 
                 if sender.send(Ok(listeners)).is_err() {
-                    error!("could not send list of listeners");
+                    error!("Could not send list of listeners");
                 }
             }
             DragoonCommand::GetPeerId { sender } => {
-                warn!("DragoonCommand::GetPeerId: local_peer_id()");
-                info!("getting peer ID");
+                info!("Getting peer ID");
                 let peer_id = *self.swarm.local_peer_id();
 
                 if sender.send(Ok(peer_id)).is_err() {
-                    error!("could not send peer ID");
+                    error!("Could not send peer ID");
                 }
             }
             DragoonCommand::GetNetworkInfo { sender } => {
-                warn!("DragoonCommand::GetNetworkInfo: network_info()");
-                info!("getting network info");
+                info!("Getting network info");
                 let network_info = self.swarm.network_info();
 
                 if sender.send(Ok(network_info)).is_err() {
-                    error!("could not send network info");
+                    error!("Could not send network info");
                 }
             }
             DragoonCommand::RemoveListener {
                 listener_id,
                 sender,
             } => {
-                warn!(
-                    "DragoonCommand::RemoveListener: remove_listener({})",
-                    listener_id
-                );
-                info!("removing listener");
-
+                info!("Removing listener {}", listener_id);
                 if let Some(listener) = self.listeners.get(&listener_id) {
                     let res = self.swarm.remove_listener(*listener);
 
                     if sender.send(Ok(res)).is_err() {
-                        error!("could not send remove listener");
+                        error!("Could not send remove listener");
                     }
                 } else {
-                    error!("could not find listener");
-                    let err = BadListener(format!("listener {} not found", listener_id));
+                    error!("Listener {} not found", listener_id);
+                    let err = BadListener(format!("Listener {} not found", listener_id));
                     if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
+                        error!("Could not send result");
                     }
                 }
             }
             DragoonCommand::GetConnectedPeers { sender } => {
-                warn!("DragoonCommand::GetConnectedPeers: connected_peers()");
-                info!("getting list of connected peers");
+                info!("Getting list of connected peers");
                 let connected_peers = self
                     .swarm
                     .connected_peers()
@@ -368,17 +356,16 @@ impl DragoonNetwork {
                     .collect::<Vec<PeerId>>();
 
                 if sender.send(Ok(connected_peers)).is_err() {
-                    error!("could not send list of connected peers");
+                    error!("Could not send list of connected peers");
                 }
             }
             DragoonCommand::Dial { multiaddr, sender } => {
-                warn!("DragoonCommand::Dial: dial({})", multiaddr);
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
-                    info!("dialing {}", addr);
+                    info!("Dialing {}", addr);
                     match self.swarm.dial(addr) {
                         Ok(()) => {
                             if sender.send(Ok(())).is_err() {
-                                error!("could not send result");
+                                error!("Could not send result");
                             }
                         }
                         Err(de) => {
@@ -386,38 +373,36 @@ impl DragoonNetwork {
 
                             let err = DialError(de.to_string());
                             if sender.send(Err(Box::new(err))).is_err() {
-                                error!("Cannot send result");
+                                error!("Could not send result");
                             }
                         }
                     }
                 } else {
-                    error!("cannot parse addr {}", multiaddr);
-                    let err = BadListener(format!("could not parse {}", multiaddr));
+                    error!("Could not parse addr {}", multiaddr);
+                    let err = BadListener(format!("Could not parse {}", multiaddr));
                     if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
+                        error!("Could not send result");
                     }
                 }
             }
             DragoonCommand::AddPeer { multiaddr, sender } => {
-                warn!("DragoonCommand::AddPeer: add_address(_, {})", multiaddr);
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
-                    info!("adding peer {} from {}", addr, multiaddr);
+                    info!("Adding peer {} from {}", addr, multiaddr);
                     if let Some(Protocol::P2p(hash)) = addr.iter().last() {
                         self.swarm.behaviour_mut().kademlia.add_address(&hash, addr);
                         if sender.send(Ok(())).is_err() {
-                            error!("could not send result");
+                            error!("Could not send result");
                         }
                     }
                 } else {
-                    error!("cannot parse addr {}", multiaddr);
-                    let err = BadListener(format!("could not parse {}", multiaddr));
+                    error!("Cannot parse addr {}", multiaddr);
+                    let err = BadListener(format!("Could not parse {}", multiaddr));
                     if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
+                        error!("Could not send result");
                     }
                 }
             }
             DragoonCommand::StartProvide { key, sender } => {
-                warn!("DragoonCommand::StartProvide: start_providing({})", key);
                 if let Ok(query_id) = self
                     .swarm
                     .behaviour_mut()
@@ -426,15 +411,14 @@ impl DragoonNetwork {
                 {
                     self.pending_start_providing.insert(query_id, sender);
                 } else {
-                    error!("cannot provide {}", key);
-                    let err = ProviderError(format!("could not provide {}", key));
+                    error!("Could not provide {}", key);
+                    let err = ProviderError(format!("Could not provide {}", key));
                     if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
+                        error!("Could not send result");
                     }
                 }
             }
             DragoonCommand::GetProviders { key, sender } => {
-                warn!("DragoonCommand::GetProviders: get_providers({})", key);
                 let query_id = self
                     .swarm
                     .behaviour_mut()
@@ -443,11 +427,11 @@ impl DragoonNetwork {
                 self.pending_get_providers.insert(query_id, sender);
             }
             DragoonCommand::Bootstrap { sender } => {
-                warn!("DragoonCommand::Bootstrap: bootstrap()");
+                info!("Bootstrap");
                 match self.swarm.behaviour_mut().kademlia.bootstrap() {
                     Ok(_) => {
                         if sender.send(Ok(())).is_err() {
-                            error!("could not send result");
+                            error!("Could not send result");
                         }
                     }
                     Err(nkp) => {
@@ -455,13 +439,12 @@ impl DragoonNetwork {
 
                         let err = BootstrapError(nkp.to_string());
                         if sender.send(Err(Box::new(err))).is_err() {
-                            error!("Cannot send result");
+                            error!("Could not send result");
                         }
                     }
                 }
             }
             DragoonCommand::Get { key, peer, sender } => {
-                warn!("DragoonCommand::Get: send_request({}, {})", peer, key);
                 let request_id = self
                     .swarm
                     .behaviour_mut()
@@ -470,7 +453,6 @@ impl DragoonNetwork {
                 self.pending_request_file.insert(request_id, sender);
             }
             DragoonCommand::AddFile { file, channel } => {
-                warn!("DragoonCommand::AddFile: send_response({:?})", file);
                 self.swarm
                     .behaviour_mut()
                     .request_response
