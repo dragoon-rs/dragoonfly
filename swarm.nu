@@ -52,14 +52,12 @@ export def "swarm list" []: nothing -> table {
     ps | where name =~ $NAME
 }
 
-def parse-log [--id: int]: string -> table<date: datetime, level: string, id: int, file: string, msg: string> {
+def parse-tracing-logs []: string -> table<date: datetime, level: string, id: int, file: string, msg: string> {
      lines
         | ansi strip
         | parse --regex '^(?<date>.{27}) (?<level>.{5}) (?<file>[\w:_-]*): (?<msg>.*)'
         | str trim level
-        | insert id $id
         | into datetime date
-        | move id --before file
 }
 
 export def "swarm log" []: nothing -> table<date: datetime, level: string, id: int, file: string, msg: string> {
@@ -67,7 +65,12 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
     # related to https://github.com/nushell/nushell/issues/10428
     mut logs = []
     for id in (seq 0 (swarm list | length | $in - 1)) {
-        let log = $env.SWARM_LOG_DIR | path join $"($id).log" | open $in --raw | parse-log --id $id
+        let log = $env.SWARM_LOG_DIR
+            | path join $"($id).log"
+            | open $in --raw
+            | parse-tracing-logs
+            | insert id $id
+            | move id --before file
         $logs = ($logs | append $log)
     }
 
