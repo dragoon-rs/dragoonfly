@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::app::AppState;
 use crate::dragoon_network::{Event, FileResponse};
@@ -286,6 +286,7 @@ pub(crate) async fn start_provide(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    warn!("sending 'StartProvide'");
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::StartProvide { key, sender };
     let cmd_name = cmd.to_string();
@@ -304,6 +305,7 @@ pub(crate) async fn get_providers(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
+    warn!("sending 'GetProviders'");
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::GetProviders { key, sender };
     let cmd_name = cmd.to_string();
@@ -344,6 +346,7 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
 
 pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
     let providers = {
+        warn!("sending 'GetProviders'");
         let (sender, receiver) = oneshot::channel();
         let cmd = DragoonCommand::GetProviders {
             key: key.clone(),
@@ -354,6 +357,7 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
         receiver.await.unwrap().unwrap()
     };
 
+    warn!("sending 'Get'");
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::Get {
         key: key.clone(),
@@ -379,14 +383,13 @@ pub(crate) async fn add_file(
     // FIXME: use a proper name
     let name = "foo";
 
-    info!("trying to add a file");
-
     loop {
         match event_receiver.try_next() {
             Ok(Some(Event::InboundRequest { channel, request })) => {
                 info!("request: {}", request);
                 if request == name {
                     info!("request accepted");
+                    warn!("sending 'AddFile'");
                     let cmd = DragoonCommand::AddFile {
                         file: content.as_bytes().to_vec(),
                         channel,
