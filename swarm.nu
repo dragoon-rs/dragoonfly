@@ -52,20 +52,23 @@ export def "swarm list" []: nothing -> table {
     ps | where name =~ $NAME
 }
 
-export def "swarm log" [id: int]: nothing -> string {
-    let log_file = $env.SWARM_LOG_DIR | path join $"($id).log"
+def parse-log [--id: int]: string -> table<date: datetime, level: string, id: int, file: string, msg: string> {
+     lines
+        | ansi strip
+        | parse "{date}  {level} {file}: {msg}"
+        | insert id $id
+        | into datetime date
+        | move id --before file
+}
 
-    if not ($log_file | path exists) {
-        error make {
-            msg: $"(ansi red_bold)invalid_node_id(ansi reset)"
-            label: {
-                text: $"expected an id between 0 and (swarm list | length | $in - 1), found ($id)"
-                span: (metadata $id).span
-            }
-        }
+export def "swarm log" []: nothing -> table<date: datetime, level: string, id: int, file: string, msg: string> {
+    mut logs = []
+    for id in (seq 0 (swarm list | length | $in - 1)) {
+        let log = $env.SWARM_LOG_DIR | path join $"($id).log" | open $in --raw | parse-log --id $id
+        $logs = ($logs | append $log)
     }
 
-    open $log_file
+    $logs
 }
 
 # kill the swarm
