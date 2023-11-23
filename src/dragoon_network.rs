@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::commands::DragoonCommand;
 use crate::error::DragoonError::{BadListener, BootstrapError, DialError, ProviderError};
@@ -133,6 +133,7 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
+                warn!("OutboundQueryProgressed(StartProviding): {}", id);
                 if let Some(sender) = self.pending_start_providing.remove(&id) {
                     info!("started providing {:?}", result_ok);
                     if sender.send(Ok(())).is_err() {
@@ -149,6 +150,7 @@ impl DragoonNetwork {
                     ..
                 },
             )) => {
+                warn!("OutboundQueryProgressed(GetProviders): {}", id);
                 if let Ok(res) = get_providers_result {
                     match res {
                         kad::GetProvidersOk::FoundProviders { providers, .. } => {
@@ -212,7 +214,7 @@ impl DragoonNetwork {
                 request_response::Message::Request {
                     request, channel, ..
                 } => {
-                    info!("request");
+                    warn!("RequestResponse(Request): {:?}", request);
                     self.event_sender
                         .send(Event::InboundRequest {
                             request: request.0,
@@ -225,7 +227,7 @@ impl DragoonNetwork {
                     request_id,
                     response,
                 } => {
-                    info!("response");
+                    warn!("RequestResponse(Response): {:?}", request_id);
                     let _ = self
                         .pending_request_file
                         .remove(&request_id)
@@ -238,6 +240,7 @@ impl DragoonNetwork {
                     request_id, error, ..
                 },
             )) => {
+                    warn!("RequestResponse(OutboundFailure): {:?}", request_id);
                 let _ = self
                     .pending_request_file
                     .remove(&request_id)
@@ -403,6 +406,7 @@ impl DragoonNetwork {
                 }
             }
             DragoonCommand::StartProvide { key, sender } => {
+                warn!("StartProvide: start_providing({})", key);
                 if let Ok(query_id) = self
                     .swarm
                     .behaviour_mut()
@@ -444,6 +448,7 @@ impl DragoonNetwork {
                 }
             }
             DragoonCommand::Get { key, peer, sender } => {
+                warn!("Get: send_request({}, {})", key, peer);
                 let request_id = self
                     .swarm
                     .behaviour_mut()
@@ -452,6 +457,7 @@ impl DragoonNetwork {
                 self.pending_request_file.insert(request_id, sender);
             }
             DragoonCommand::AddFile { file, channel } => {
+                warn!("AddFile: send_response({:?})", file);
                 self.swarm
                     .behaviour_mut()
                     .request_response
