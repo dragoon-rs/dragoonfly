@@ -4,7 +4,7 @@ const NAME = "dragoonfly"
 const LOG_DIR = ($nu.temp-path | path join $NAME)
 
 # create a swarm table
-export def "swarm create" [n: int] {
+export def "swarm create" [n: int]: nothing -> table {
     seq 0 ($n - 1) | each { {
         ip_port: $"127.0.0.1:(3_000 + $in)",
         seed: $in,
@@ -47,12 +47,12 @@ export def "swarm run" [
 }
 
 # list the nodes of the swarm
-export def "swarm list" [] {
+export def "swarm list" []: nothing -> table {
     ps | where name =~ $NAME
 }
 
 # kill the swarm
-export def "swarm kill" [] {
+export def "swarm kill" []: nothing -> nothing {
     ps | where name =~ $NAME | each {|it|
         print $"killing ($it.pid)"
         kill $it.pid
