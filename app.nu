@@ -134,3 +134,11 @@ export def get [
     log debug $"getting content of ($key) from ($node)"
     $"get/($key)" | run-command $node
 }
+
+export def add-file [
+    content: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    log debug $"adding ($content) to ($node)"
+    $"add-file/($content)" | run-command $node
+}
