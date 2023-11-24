@@ -133,70 +133,62 @@ impl DragoonNetwork {
         debug!("[event] {:?}", event);
         match event {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
-                kad::Event::OutboundQueryProgressed {
-                    id,
-                    result: kad::QueryResult::StartProviding(Ok(result_ok)),
-                    ..
-                },
-            )) => {
-                if let Some(sender) = self.pending_start_providing.remove(&id) {
-                    info!("Started providing {:?}", result_ok);
-                    if sender.send(Ok(())).is_err() {
-                        error!("Could not send result");
+                kad::Event::OutboundQueryProgressed { id, result, .. },
+            )) => match result {
+                kad::QueryResult::StartProviding(Ok(result_ok)) => {
+                    if let Some(sender) = self.pending_start_providing.remove(&id) {
+                        info!("Started providing {:?}", result_ok);
+                        if sender.send(Ok(())).is_err() {
+                            error!("Could not send result");
+                        }
+                    } else {
+                        error!("Could not find id = {} in the providers", id);
                     }
-                } else {
-                    error!("Could not find id = {} in the providers", id);
                 }
-            }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
-                kad::Event::OutboundQueryProgressed {
-                    id,
-                    result: kad::QueryResult::GetProviders(get_providers_result),
-                    ..
-                },
-            )) => {
-                if let Ok(res) = get_providers_result {
-                    match res {
-                        kad::GetProvidersOk::FoundProviders { providers, .. } => {
-                            info!("Found providers {:?}", providers);
-                            if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                if sender.send(Ok(providers)).is_err() {
-                                    error!("Cannot send result");
+                kad::QueryResult::GetProviders(get_providers_result) => {
+                    if let Ok(res) = get_providers_result {
+                        match res {
+                            kad::GetProvidersOk::FoundProviders { providers, .. } => {
+                                info!("Found providers {:?}", providers);
+                                if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                    if sender.send(Ok(providers)).is_err() {
+                                        error!("Cannot send result");
+                                    }
+                                } else {
+                                    error!("could not find {} in the providers", id);
                                 }
-                            } else {
-                                error!("could not find {} in the providers", id);
                             }
-                        }
-                        kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
-                            info!("Finished get providers {closest_peers:?}");
-                        }
-                    }
-                } else {
-                    info!("Could not get the providers");
-                    if let Some(sender) = self.pending_get_providers.remove(&id) {
-                        if let Some(mut query_id) =
-                            self.swarm.behaviour_mut().kademlia.query_mut(&id)
-                        {
-                            query_id.finish();
-                            if sender.send(Ok(HashSet::default())).is_err() {
-                                error!("Cannot send result");
-                            }
-                        } else {
-                            error!("could not find {} in the query ids", id);
-                            let err =
-                                ProviderError(format!("could not find {} in the query ids", id));
-                            if sender.send(Err(Box::new(err))).is_err() {
-                                error!("Cannot send result");
+                            kad::GetProvidersOk::FinishedWithNoAdditionalRecord {
+                                closest_peers,
+                            } => {
+                                info!("Finished get providers {closest_peers:?}");
                             }
                         }
                     } else {
-                        error!("could not find {} in the providers", id);
+                        info!("Could not get the providers");
+                        if let Some(sender) = self.pending_get_providers.remove(&id) {
+                            if let Some(mut query_id) =
+                                self.swarm.behaviour_mut().kademlia.query_mut(&id)
+                            {
+                                query_id.finish();
+                                if sender.send(Ok(HashSet::default())).is_err() {
+                                    error!("Cannot send result");
+                                }
+                            } else {
+                                error!("could not find {} in the query ids", id);
+                                let err = ProviderError(format!(
+                                    "could not find {} in the query ids",
+                                    id
+                                ));
+                                if sender.send(Err(Box::new(err))).is_err() {
+                                    error!("Cannot send result");
+                                }
+                            }
+                        } else {
+                            error!("could not find {} in the providers", id);
+                        }
                     }
                 }
-            }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
-                kad::Event::OutboundQueryProgressed { id, result, .. },
-            )) => match result {
                 kad::QueryResult::GetRecord(Ok(get_record_ok)) => {
                     let value = match get_record_ok {
                         kad::GetRecordOk::FoundRecord(record) => {
