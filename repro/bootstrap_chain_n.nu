@@ -22,9 +22,3 @@ log info "show connected peers in order"
 for node in $NODES {
     print (app get-connected-peers --node $node)
 }
-
-app start-provide "foo" --node ($NODES | first)
-app start-provide "bar" --node ($NODES | last)
-
-print (app get-providers "foo" --node ($NODES | last))
-print (app get-providers "bar" --node ($NODES | first))
