@@ -136,9 +136,10 @@ export def get [
 }
 
 export def add-file [
+    key: string,
     content: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
     log debug $"adding ($content) to ($node)"
-    $"add-file/($content)" | run-command $node
+    $"add-file/($key)/($content)" | run-command $node
 }

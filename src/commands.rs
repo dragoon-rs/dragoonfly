@@ -383,20 +383,17 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
 }
 
 pub(crate) async fn add_file(
-    Path(content): Path<String>,
+    Path((key, content)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command `add_file`");
     let mut event_receiver = state.event_receiver.lock().await;
 
-    // FIXME: use a proper name
-    let name = "foo";
-
     loop {
         match event_receiver.next().await {
             Some(Event::InboundRequest { channel, request }) => {
                 debug!("add_file: request '{}'", request);
-                if request == name {
+                if request == key {
                     debug!("add_file: request accepted");
                     let cmd = DragoonCommand::AddFile {
                         file: content.as_bytes().to_vec(),
