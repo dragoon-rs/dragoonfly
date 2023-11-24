@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 use crate::app::AppState;
 use crate::dragoon_network::{Event, FileResponse};
@@ -386,7 +386,10 @@ pub(crate) async fn add_file(
     Path((key, content)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    info!("running command `add_file`");
+    info!(
+        "running command `add_file`: key = {}, content = {}",
+        key, content
+    );
     let mut event_receiver = state.event_receiver.lock().await;
 
     loop {
