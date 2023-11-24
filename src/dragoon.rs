@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use std::task::{Context, Poll};
 use libp2p::identity::PublicKey;
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, StreamProtocol};
 use libp2p::core::Endpoint;
+use libp2p::core::upgrade::ReadyUpgrade;
 use libp2p::swarm::{ConnectionDenied, ConnectionHandler, ConnectionHandlerEvent, ConnectionId, FromSwarm, NetworkBehaviour, SubstreamProtocol, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm};
 use libp2p::swarm::handler::ConnectionEvent;
 
@@ -26,25 +27,38 @@ impl Handler {
 impl ConnectionHandler for Handler {
     type FromBehaviour = ();
     type ToBehaviour = Event;
-    type InboundProtocol = ();
-    type OutboundProtocol = ();
+    type InboundProtocol = ReadyUpgrade<StreamProtocol>;
+    type OutboundProtocol = ReadyUpgrade<StreamProtocol>;
     type InboundOpenInfo = ();
     type OutboundOpenInfo = ();
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
-        todo!()
+        SubstreamProtocol::new(
+            ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")), ()
+        )
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
-        todo!()
+    #[tracing::instrument(level = "trace", name = "ConnectionHandler::poll", skip(self, cx))]
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>
+    ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
+        return Poll::Pending;
     }
 
     fn on_behaviour_event(&mut self, _event: Self::FromBehaviour) {
         todo!()
     }
 
-    fn on_connection_event(&mut self, event: ConnectionEvent<Self::InboundProtocol, Self::OutboundProtocol, Self::InboundOpenInfo, Self::OutboundOpenInfo>) {
-        todo!()
+    fn on_connection_event(
+        &mut self,
+        event: ConnectionEvent<
+            Self::InboundProtocol,
+            Self::OutboundProtocol,
+            Self::InboundOpenInfo,
+            Self::OutboundOpenInfo
+        >) {
+        println!("on_connection_event: {event:?}");
     }
 }
 
@@ -77,10 +91,11 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
-        todo!()
+        println!("on_swarm_event: {event:?}");
     }
 
     fn on_connection_handler_event(&mut self, peer: PeerId, _connection_id: ConnectionId, _event: THandlerOutEvent<Self>) {
+        println!("on_connection_handler_event, push Event");
         self.events.push_front(Event {
             peer
         })
