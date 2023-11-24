@@ -2,7 +2,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot::{self, Canceled};
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use libp2p::request_response::ResponseChannel;
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
@@ -393,8 +393,8 @@ pub(crate) async fn add_file(
     let name = "foo";
 
     loop {
-        match event_receiver.try_next() {
-            Ok(Some(Event::InboundRequest { channel, request })) => {
+        match event_receiver.next().await {
+            Some(Event::InboundRequest { channel, request }) => {
                 debug!("add_file: request '{}'", request);
                 if request == name {
                     debug!("add_file: request accepted");
