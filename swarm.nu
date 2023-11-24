@@ -89,3 +89,8 @@ export def "swarm kill" []: nothing -> nothing {
 
     exit
 }
+
+# decode a list of integer bytes into the underlying encoded string
+export def "bytes decode" [encoding: string = "utf-8"]: list<int> -> string {
+    each { into binary | bytes at 0..1 } | bytes collect | decode $encoding
+}
