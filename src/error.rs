@@ -10,7 +10,7 @@ pub enum DragoonError {
     #[error("Could not dial a peer")]
     DialError(String),
     #[error("unexpected error from Dragoon")]
-    UnexpectedError,
+    UnexpectedError(String),
     #[error("Could not provide")]
     ProviderError(String),
     #[error("Bootstrap error")]
@@ -20,7 +20,10 @@ pub enum DragoonError {
 impl IntoResponse for DragoonError {
     fn into_response(self) -> Response {
         let (status, err_msg) = match self {
-            DragoonError::UnexpectedError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            DragoonError::UnexpectedError(ref msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("{}: {}", self, msg),
+            ),
             DragoonError::BadListener(ref msg) => {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }

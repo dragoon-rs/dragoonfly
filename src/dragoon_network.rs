@@ -138,11 +138,12 @@ impl DragoonNetwork {
                 kad::QueryResult::StartProviding(Ok(result_ok)) => {
                     if let Some(sender) = self.pending_start_providing.remove(&id) {
                         info!("Started providing {:?}", result_ok);
+                        debug!("Sending empty response");
                         if sender.send(Ok(())).is_err() {
                             error!("Could not send result");
                         }
                     } else {
-                        error!("Could not find id = {} in the providers", id);
+                        error!("Could not find id = {} in the start providers", id);
                     }
                 }
                 kad::QueryResult::GetProviders(get_providers_result) => {
@@ -151,6 +152,7 @@ impl DragoonNetwork {
                             kad::GetProvidersOk::FoundProviders { providers, .. } => {
                                 info!("Found providers {:?}", providers);
                                 if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                    debug!("Sending providers: {:?}", providers);
                                     if sender.send(Ok(providers)).is_err() {
                                         error!("Cannot send result");
                                     }
@@ -171,6 +173,7 @@ impl DragoonNetwork {
                                 self.swarm.behaviour_mut().kademlia.query_mut(&id)
                             {
                                 query_id.finish();
+                                debug!("Sending empty providers");
                                 if sender.send(Ok(HashSet::default())).is_err() {
                                     error!("Cannot send result");
                                 }
@@ -180,6 +183,7 @@ impl DragoonNetwork {
                                     "could not find {} in the query ids",
                                     id
                                 ));
+                                debug!("Sending error");
                                 if sender.send(Err(Box::new(err))).is_err() {
                                     error!("Cannot send result");
                                 }
@@ -200,18 +204,26 @@ impl DragoonNetwork {
                         }
                     };
 
-                    let sender = self.pending_get_record.remove(&id).unwrap();
-                    if sender.send(Ok(value)).is_err() {
-                        error!("Cannot send result");
+                    if let Some(sender) = self.pending_get_record.remove(&id) {
+                        debug!("Sending value {:?}", value);
+                        if sender.send(Ok(value)).is_err() {
+                            error!("Cannot send result");
+                        }
+                    } else {
+                        error!("could not find {} in the get records", id);
                     }
                 }
                 kad::QueryResult::GetRecord(Err(err)) => {
                     error!("Failed to get record: {err:?}");
                 }
                 kad::QueryResult::PutRecord(Ok(kad::PutRecordOk { .. })) => {
-                    let sender = self.pending_put_record.remove(&id).unwrap();
-                    if sender.send(Ok(())).is_err() {
-                        error!("Cannot send result");
+                    if let Some(sender) = self.pending_put_record.remove(&id) {
+                        debug!("Sending empty response");
+                        if sender.send(Ok(())).is_err() {
+                            error!("Cannot send result");
+                        }
+                    } else {
+                        error!("could not find {} in the put records", id);
                     }
                 }
                 kad::QueryResult::PutRecord(Err(err)) => {
@@ -241,28 +253,30 @@ impl DragoonNetwork {
                     request, channel, ..
                 } => {
                     debug!("Sending inbound request '{}'", request.0);
-                    self.event_sender
+                    if let Err(se) = self
+                        .event_sender
                         .send(Event::InboundRequest {
                             request: request.0,
                             channel,
                         })
                         .await
-                        .expect("Event receiver not to be dropped.");
+                    {
+                        error!("could not send inbound request: {}", se);
+                    }
                 }
                 request_response::Message::Response {
                     request_id,
                     response,
                 } => {
                     debug!("Preparing response from request {}", request_id);
-                    let sender = self
-                        .pending_request_file
-                        .remove(&request_id)
-                        .expect("Request to still be pending.");
-
-                    debug!("Sending response {:?}", response);
-                    sender
-                        .send(Ok(response.0))
-                        .expect("Could not send response");
+                    if let Some(sender) = self.pending_request_file.remove(&request_id) {
+                        debug!("Sending response {:?}", response);
+                        if sender.send(Ok(response.0)).is_err() {
+                            error!("Could not send result");
+                        }
+                    } else {
+                        error!("could not find {} in the request files", request_id);
+                    }
                 }
             },
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
@@ -271,11 +285,14 @@ impl DragoonNetwork {
                 },
             )) => {
                 debug!("Request {} failed with {}", request_id, error);
-                let _ = self
-                    .pending_request_file
-                    .remove(&request_id)
-                    .expect("Request to still be pending.")
-                    .send(Err(Box::new(error)));
+                if let Some(sender) = self.pending_request_file.remove(&request_id) {
+                    debug!("Sending error {}", error);
+                    if sender.send(Err(Box::new(error))).is_err() {
+                        error!("Could not send result");
+                    }
+                } else {
+                    error!("could not find {} in the request files", request_id);
+                }
             }
             e => warn!("[unknown event] {:?}", e),
         }
@@ -301,6 +318,7 @@ impl DragoonNetwork {
                                 .unwrap();
                             self.listeners.insert(id, listener_id);
 
+                            debug!("sending id {}", id);
                             if sender.send(Ok(id)).is_err() {
                                 error!("Could not send listener ID");
                             }
@@ -315,6 +333,7 @@ impl DragoonNetwork {
 
                             error!("{}", err_msg);
 
+                            debug!("sending error {}", err_msg);
                             if sender.send(Err(Box::new(BadListener(err_msg)))).is_err() {
                                 error!("Could not send result");
                             }
@@ -323,13 +342,14 @@ impl DragoonNetwork {
                 } else {
                     error!("Could not parse addr {}", multiaddr);
                     let err = BadListener(format!("Could not parse {}", multiaddr));
+
+                    debug!("sending error {}", err);
                     if sender.send(Err(Box::new(err))).is_err() {
                         error!("Could not send result");
                     }
                 }
             }
             DragoonCommand::GetListeners { sender } => {
-                info!("Getting listeners");
                 let listeners = self
                     .swarm
                     .listeners()
@@ -337,22 +357,23 @@ impl DragoonNetwork {
                     .cloned()
                     .collect::<Vec<Multiaddr>>();
 
+                debug!("sending listeners {:?}", listeners);
                 if sender.send(Ok(listeners)).is_err() {
                     error!("Could not send list of listeners");
                 }
             }
             DragoonCommand::GetPeerId { sender } => {
-                info!("Getting peer ID");
                 let peer_id = *self.swarm.local_peer_id();
 
+                debug!("sending peer_id {}", peer_id);
                 if sender.send(Ok(peer_id)).is_err() {
                     error!("Could not send peer ID");
                 }
             }
             DragoonCommand::GetNetworkInfo { sender } => {
-                info!("Getting network info");
                 let network_info = self.swarm.network_info();
 
+                debug!("sending network info {:?}", network_info);
                 if sender.send(Ok(network_info)).is_err() {
                     error!("Could not send network info");
                 }
@@ -361,16 +382,18 @@ impl DragoonNetwork {
                 listener_id,
                 sender,
             } => {
-                info!("Removing listener {}", listener_id);
                 if let Some(listener) = self.listeners.get(&listener_id) {
                     let res = self.swarm.remove_listener(*listener);
 
+                    debug!("sending result {}", res);
                     if sender.send(Ok(res)).is_err() {
                         error!("Could not send remove listener");
                     }
                 } else {
                     error!("Listener {} not found", listener_id);
                     let err = BadListener(format!("Listener {} not found", listener_id));
+
+                    debug!("sending error {}", err);
                     if sender.send(Err(Box::new(err))).is_err() {
                         error!("Could not send result");
                     }
@@ -385,23 +408,25 @@ impl DragoonNetwork {
                     .cloned()
                     .collect::<Vec<PeerId>>();
 
+                debug!("sending connected_peers {:?}", connected_peers);
                 if sender.send(Ok(connected_peers)).is_err() {
                     error!("Could not send list of connected peers");
                 }
             }
             DragoonCommand::Dial { multiaddr, sender } => {
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
-                    info!("Dialing {}", addr);
                     match self.swarm.dial(addr) {
                         Ok(()) => {
+                            debug!("sending empty response");
                             if sender.send(Ok(())).is_err() {
                                 error!("Could not send result");
                             }
                         }
                         Err(de) => {
                             error!("error: {}", de);
-
                             let err = DialError(de.to_string());
+
+                            debug!("sending error {}", err);
                             if sender.send(Err(Box::new(err))).is_err() {
                                 error!("Could not send result");
                             }
@@ -410,6 +435,8 @@ impl DragoonNetwork {
                 } else {
                     error!("Could not parse addr {}", multiaddr);
                     let err = BadListener(format!("Could not parse {}", multiaddr));
+
+                    debug!("sending error {}", err);
                     if sender.send(Err(Box::new(err))).is_err() {
                         error!("Could not send result");
                     }
@@ -417,16 +444,28 @@ impl DragoonNetwork {
             }
             DragoonCommand::AddPeer { multiaddr, sender } => {
                 if let Ok(addr) = multiaddr.parse::<Multiaddr>() {
-                    info!("Adding peer {} from {}", addr, multiaddr);
                     if let Some(Protocol::P2p(hash)) = addr.iter().last() {
                         self.swarm.behaviour_mut().kademlia.add_address(&hash, addr);
+
+                        debug!("sending empty response");
                         if sender.send(Ok(())).is_err() {
+                            error!("Could not send result");
+                        }
+                    } else {
+                        error!("could no isolate P2P component in {}", addr);
+                        let err =
+                            BadListener(format!("could no isolate P2P component in {}", addr));
+
+                        debug!("sending error {}", err);
+                        if sender.send(Err(Box::new(err))).is_err() {
                             error!("Could not send result");
                         }
                     }
                 } else {
                     error!("Cannot parse addr {}", multiaddr);
                     let err = BadListener(format!("Could not parse {}", multiaddr));
+
+                    debug!("sending error {}", err);
                     if sender.send(Err(Box::new(err))).is_err() {
                         error!("Could not send result");
                     }
@@ -443,6 +482,8 @@ impl DragoonNetwork {
                 } else {
                     error!("Could not provide {}", key);
                     let err = ProviderError(format!("Could not provide {}", key));
+
+                    debug!("sending error {}", err);
                     if sender.send(Err(Box::new(err))).is_err() {
                         error!("Could not send result");
                     }
@@ -457,7 +498,6 @@ impl DragoonNetwork {
                 self.pending_get_providers.insert(query_id, sender);
             }
             DragoonCommand::Bootstrap { sender } => {
-                info!("Bootstrap");
                 match self.swarm.behaviour_mut().kademlia.bootstrap() {
                     Ok(_) => {
                         if sender.send(Ok(())).is_err() {
@@ -466,8 +506,9 @@ impl DragoonNetwork {
                     }
                     Err(nkp) => {
                         error!("error: {}", nkp);
-
                         let err = BootstrapError(nkp.to_string());
+
+                        debug!("sending error {}", err);
                         if sender.send(Err(Box::new(err))).is_err() {
                             error!("Could not send result");
                         }
@@ -483,11 +524,15 @@ impl DragoonNetwork {
                 self.pending_request_file.insert(request_id, sender);
             }
             DragoonCommand::AddFile { file, channel } => {
-                self.swarm
+                if self
+                    .swarm
                     .behaviour_mut()
                     .request_response
                     .send_response(channel, FileResponse(file))
-                    .expect("Connection to peer to be still open.");
+                    .is_err()
+                {
+                    error!("Could not send response");
+                }
             }
             DragoonCommand::PutRecord { key, value, sender } => {
                 let record = kad::Record {
@@ -496,13 +541,16 @@ impl DragoonNetwork {
                     publisher: None,
                     expires: None,
                 };
-                let id = self
+                if let Ok(id) = self
                     .swarm
                     .behaviour_mut()
                     .kademlia
                     .put_record(record, kad::Quorum::One)
-                    .expect("Failed to store record locally.");
-                self.pending_put_record.insert(id, sender);
+                {
+                    self.pending_put_record.insert(id, sender);
+                } else {
+                    error!("Could not put record ");
+                }
             }
             DragoonCommand::GetRecord { key, sender } => {
                 let id = self

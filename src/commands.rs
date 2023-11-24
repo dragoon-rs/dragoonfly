@@ -372,9 +372,16 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
             key: key.clone(),
             sender,
         };
+        let cmd_name = cmd.to_string();
         send_command(cmd, state.clone()).await;
 
-        receiver.await.unwrap().unwrap()
+        match receiver.await {
+            Err(e) => return handle_canceled(e, &cmd_name),
+            Ok(res) => match res {
+                Err(e) => return handle_dragoon_error(e, &cmd_name),
+                Ok(providers) => providers,
+            },
+        }
     };
 
     let (sender, receiver) = oneshot::channel();
@@ -386,11 +393,16 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
         peer: *providers.into_iter().collect::<Vec<_>>().get(0).unwrap(),
         sender,
     };
+    let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
 
-    let file_content = receiver.await.unwrap().unwrap();
-
-    Json(file_content).into_response()
+    match receiver.await {
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(content) => Json(content).into_response(),
+        },
+    }
 }
 
 pub(crate) async fn add_file(
@@ -468,7 +480,8 @@ fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {
         dragoon_error.into_response()
     } else {
         error!("Could not get return message from command `{}`", command);
-        DragoonError::UnexpectedError.into_response()
+        DragoonError::UnexpectedError(format!("could not convert error for {}", command))
+            .into_response()
     }
 }
 
@@ -477,7 +490,7 @@ fn handle_canceled(err: Canceled, command: &str) -> Response {
         "Could not receive a return from command `{}`: {:?}",
         command, err
     );
-    DragoonError::UnexpectedError.into_response()
+    DragoonError::UnexpectedError("Command was canceled".to_string()).into_response()
 }
 
 async fn send_command(command: DragoonCommand, state: Arc<AppState>) -> Option<Response> {
@@ -488,8 +501,9 @@ async fn send_command(command: DragoonCommand, state: Arc<AppState>) -> Option<R
     info!("Sending command `{:?}`", command);
 
     if let Err(e) = cmd_sender.send(command).await {
-        error!("Could not send command `{}`: {:?}", cmd_name, e);
-        return Some(DragoonError::UnexpectedError.into_response());
+        let err = format!("Could not send command `{}`: {:?}", cmd_name, e);
+        error!(err);
+        return Some(DragoonError::UnexpectedError(err).into_response());
     }
 
     return None;
