@@ -74,7 +74,10 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
         $logs = ($logs | append $log)
     }
 
-    $logs | sort-by date
+    let logs = $logs | sort-by date
+    let start = $logs.0.date
+
+    $logs | update date { $in - $start }
 }
 
 # kill the swarm
