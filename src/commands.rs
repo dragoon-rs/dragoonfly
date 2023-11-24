@@ -80,6 +80,15 @@ pub(crate) enum DragoonCommand {
         file: Vec<u8>,
         channel: ResponseChannel<FileResponse>,
     },
+    PutRecord {
+        key: String,
+        value: Vec<u8>,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+    },
+    GetRecord {
+        key: String,
+        sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -98,6 +107,8 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             DragoonCommand::Get { .. } => write!(f, "get"),
             DragoonCommand::AddFile { .. } => write!(f, "add-file"),
+            DragoonCommand::PutRecord { .. } => write!(f, "put-record"),
+            DragoonCommand::GetRecord { .. } => write!(f, "get-record"),
         }
     }
 }
@@ -407,6 +418,48 @@ pub(crate) async fn add_file(
             }
             e => todo!("{:?}", e),
         }
+    }
+}
+
+pub(crate) async fn put_record(
+    Path((key, value)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `put_record`");
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::PutRecord {
+        key,
+        value: value.as_bytes().to_vec(),
+        sender,
+    };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        },
+    }
+}
+
+pub(crate) async fn get_record(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `get_record`");
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::GetRecord { key, sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+        Err(e) => handle_canceled(e, &cmd_name),
+        Ok(res) => match res {
+            Err(e) => handle_dragoon_error(e, &cmd_name),
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+        },
     }
 }
 

@@ -92,6 +92,9 @@ pub(crate) struct DragoonNetwork {
         HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
     pending_request_file:
         HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
+    pending_put_record: HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
+    pending_get_record:
+        HashMap<kad::QueryId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
 }
 
 impl DragoonNetwork {
@@ -108,6 +111,8 @@ impl DragoonNetwork {
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
             pending_request_file: Default::default(),
+            pending_put_record: Default::default(),
+            pending_get_record: Default::default(),
         }
     }
 
@@ -189,6 +194,39 @@ impl DragoonNetwork {
                     }
                 }
             }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
+                kad::Event::OutboundQueryProgressed { id, result, .. },
+            )) => match result {
+                kad::QueryResult::GetRecord(Ok(get_record_ok)) => {
+                    let value = match get_record_ok {
+                        kad::GetRecordOk::FoundRecord(record) => {
+                            info!("value found");
+                            record.record.value
+                        }
+                        kad::GetRecordOk::FinishedWithNoAdditionalRecord { .. } => {
+                            vec![]
+                        }
+                    };
+
+                    let sender = self.pending_get_record.remove(&id).unwrap();
+                    if sender.send(Ok(value)).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
+                kad::QueryResult::GetRecord(Err(err)) => {
+                    error!("Failed to get record: {err:?}");
+                }
+                kad::QueryResult::PutRecord(Ok(kad::PutRecordOk { .. })) => {
+                    let sender = self.pending_put_record.remove(&id).unwrap();
+                    if sender.send(Ok(())).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
+                kad::QueryResult::PutRecord(Err(err)) => {
+                    error!("Failed to put record: {err:?}");
+                }
+                _ => {}
+            },
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Sent {
                 peer_id,
                 ..
@@ -458,6 +496,29 @@ impl DragoonNetwork {
                     .request_response
                     .send_response(channel, FileResponse(file))
                     .expect("Connection to peer to be still open.");
+            }
+            DragoonCommand::PutRecord { key, value, sender } => {
+                let record = kad::Record {
+                    key: key.into_bytes().into(),
+                    value,
+                    publisher: None,
+                    expires: None,
+                };
+                let id = self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .put_record(record, kad::Quorum::One)
+                    .expect("Failed to store record locally.");
+                self.pending_put_record.insert(id, sender);
+            }
+            DragoonCommand::GetRecord { key, sender } => {
+                let id = self
+                    .swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .get_record(key.into_bytes().into());
+                self.pending_get_record.insert(id, sender);
             }
         }
     }

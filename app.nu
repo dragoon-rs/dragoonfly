@@ -143,3 +143,20 @@ export def add-file [
     log debug $"adding ($content) to ($node)"
     $"add-file/($key)/($content)" | run-command $node
 }
+
+export def put-record [
+    key: string,
+    value: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    log debug $"putting record {($key): ($value)} into ($node)"
+    $"put-record/($key)/($value)" | run-command $node
+}
+
+export def get-record [
+    key: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    log debug $"getting record with key ($key) from ($node)"
+    $"get-record/($key)" | run-command $node
+}
