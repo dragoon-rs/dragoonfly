@@ -65,19 +65,24 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
     # related to https://github.com/nushell/nushell/issues/10428
     mut logs = []
     for id in (seq 0 (swarm list | length | $in - 1)) {
-        let log = $env.SWARM_LOG_DIR
-            | path join $"($id).log"
-            | open $in --raw
-            | parse-tracing-logs
-            | insert id $id
-            | move id --before file
+        let log_file = $env.SWARM_LOG_DIR | path join $"($id).log"
+        if not ($log_file | path exists) {
+            log warning $"`($log_file)` does not exist"
+            continue
+        }
+
+        let log = open $log_file --raw | parse-tracing-logs | insert id $id | move id --before file
         $logs = ($logs | append $log)
     }
 
     let logs = $logs | sort-by date
-    let start = $logs.0.date
 
-    $logs | update date { $in - $start }
+    if not ($logs | is-empty) {
+        let start = $logs.0.date
+        $logs | update date { $in - $start }
+    } else {
+        []
+    }
 }
 
 # kill the swarm
