@@ -13,13 +13,15 @@ pub struct Event {
 }
 
 pub struct Handler {
-    remote_peer_id: PeerId
+    remote_peer_id: PeerId,
+    events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), Event>>
 }
 
 impl Handler {
     pub fn new(remote_peer_id: PeerId) -> Self {
         Self {
-            remote_peer_id
+            remote_peer_id,
+            events: VecDeque::new()
         }
     }
 }
@@ -43,6 +45,9 @@ impl ConnectionHandler for Handler {
         &mut self,
         cx: &mut Context<'_>
     ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
+        if let Some(event) = self.events.pop_front() {
+            return Poll::Ready(event);
+        }
         return Poll::Pending;
     }
 
@@ -58,7 +63,28 @@ impl ConnectionHandler for Handler {
             Self::InboundOpenInfo,
             Self::OutboundOpenInfo
         >) {
-        println!("on_connection_event: {event:?}");
+        println!("Handler::on_connection_event: {event:?}");
+        match event {
+            ConnectionEvent::FullyNegotiatedInbound(protocol, ..) => {
+
+            }
+            ConnectionEvent::FullyNegotiatedOutbound(protocol,..) => {
+
+            }
+            ConnectionEvent::LocalProtocolsChange(_) => {
+                self.events
+                    .push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
+                        protocol: SubstreamProtocol::new(
+                            ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")),
+                            (),
+                        ),
+                    });
+            }
+            ConnectionEvent::DialUpgradeError(_) => {}
+            ConnectionEvent::ListenUpgradeError(_) => {}
+            ConnectionEvent::RemoteProtocolsChange(_) => {}
+            _ => {}
+        }
     }
 }
 
@@ -91,11 +117,11 @@ impl NetworkBehaviour for Behaviour {
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
-        println!("on_swarm_event: {event:?}");
+        println!("Behaviour::on_swarm_event: {event:?}");
     }
 
     fn on_connection_handler_event(&mut self, peer: PeerId, _connection_id: ConnectionId, _event: THandlerOutEvent<Self>) {
-        println!("on_connection_handler_event, push Event");
+        println!("Behaviour::on_connection_handler_event, push Event");
         self.events.push_front(Event {
             peer
         })
@@ -109,3 +135,5 @@ impl NetworkBehaviour for Behaviour {
         Poll::Pending
     }
 }
+
+pub(crate) async fn send_dragoon_data()
