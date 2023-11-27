@@ -133,6 +133,23 @@ impl DragoonNetwork {
         debug!("[event] {:?}", event);
         match event {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
+                kad::Event::InboundRequest { request },
+            )) => match request {
+                kad::InboundRequest::GetRecord {
+                    num_closer_peers,
+                    present_locally,
+                } => info!("closer: {}, present: {}", num_closer_peers, present_locally),
+                kad::InboundRequest::PutRecord {
+                    source,
+                    connection,
+                    record,
+                } => info!(
+                    "source: {}, connection: {}, record: {:?}",
+                    source, connection, record
+                ),
+                _ => {}
+            },
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed { id, result, .. },
             )) => match result {
                 kad::QueryResult::StartProviding(Ok(result_ok)) => {
