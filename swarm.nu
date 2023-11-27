@@ -40,7 +40,7 @@ export def "swarm run" [
        $env.NU_LOG_LEVEL = "DEBUG"
        $env.SWARM_LOG_DIR = ($log_dir)
        use app.nu
-       use swarm.nu ["swarm kill", "swarm list", "swarm log"]
+       use swarm.nu ["swarm kill", "swarm list", "swarm log", "bytes decode"]
        const SWARM = ($swarm | to nuon)
     '
 
