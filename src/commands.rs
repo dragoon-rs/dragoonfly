@@ -470,7 +470,7 @@ pub(crate) async fn get_record(
         Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
             Err(e) => handle_dragoon_error(e, &cmd_name),
-            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+            Ok(bytes) => (StatusCode::OK, Json(bytes)).into_response(),
         },
     }
 }
