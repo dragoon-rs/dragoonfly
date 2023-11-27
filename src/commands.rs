@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::app::AppState;
-use crate::dragoon_network::{Event, FileResponse};
+use crate::dragoon_network::{FileResponse, DragoonEvent};
 use crate::error::DragoonError;
 
 // Potential other commands:
@@ -417,7 +417,7 @@ pub(crate) async fn add_file(
 
     loop {
         match event_receiver.next().await {
-            Some(Event::InboundRequest { channel, request }) => {
+            Some(DragoonEvent::InboundRequest { channel, request }) => {
                 debug!("add_file: request '{}'", request);
                 if request == key {
                     debug!("add_file: request accepted");

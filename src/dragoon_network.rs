@@ -3,7 +3,8 @@ use futures::prelude::*;
 
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
-use libp2p::request_response::{OutboundRequestId, ResponseChannel};
+use libp2p::kad::{QueryId, QueryResult};
+use libp2p::request_response::{Event, Message, OutboundRequestId, ResponseChannel};
 use libp2p::{
     core::Multiaddr,
     identify, kad,
@@ -67,7 +68,7 @@ pub(crate) async fn create_swarm(
 }
 
 #[derive(Debug)]
-pub(crate) enum Event {
+pub(crate) enum DragoonEvent {
     InboundRequest {
         request: String,
         channel: ResponseChannel<FileResponse>,
@@ -84,7 +85,7 @@ pub(crate) struct DragoonBehaviour {
 pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
-    event_sender: mpsc::Sender<Event>,
+    event_sender: mpsc::Sender<DragoonEvent>,
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing:
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
@@ -101,7 +102,7 @@ impl DragoonNetwork {
     pub fn new(
         swarm: Swarm<DragoonBehaviour>,
         command_receiver: mpsc::Receiver<DragoonCommand>,
-        event_sender: mpsc::Sender<Event>,
+        event_sender: mpsc::Sender<DragoonEvent>,
     ) -> Self {
         Self {
             swarm,
@@ -129,6 +130,163 @@ impl DragoonNetwork {
         }
     }
 
+    async fn handle_query_result(&mut self, result: QueryResult, id: QueryId) {
+        match result {
+            kad::QueryResult::StartProviding(Ok(result_ok)) => {
+                if let Some(sender) = self.pending_start_providing.remove(&id) {
+                    info!("Started providing {:?}", result_ok);
+                    debug!("Sending empty response");
+                    if sender.send(Ok(())).is_err() {
+                        error!("Could not send result");
+                    }
+                } else {
+                    error!("Could not find id = {} in the start providers", id);
+                }
+            }
+            kad::QueryResult::GetProviders(get_providers_result) => {
+                if let Ok(res) = get_providers_result {
+                    match res {
+                        kad::GetProvidersOk::FoundProviders { providers, .. } => {
+                            info!("Found providers {:?}", providers);
+                            if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                debug!("Sending providers: {:?}", providers);
+                                if sender.send(Ok(providers)).is_err() {
+                                    error!("Cannot send result");
+                                }
+                            } else {
+                                error!("could not find {} in the providers", id);
+                            }
+                        }
+                        kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
+                            info!("Finished get providers {closest_peers:?}");
+                        }
+                    }
+                } else {
+                    info!("Could not get the providers");
+                    if let Some(sender) = self.pending_get_providers.remove(&id) {
+                        if let Some(mut query_id) =
+                            self.swarm.behaviour_mut().kademlia.query_mut(&id)
+                        {
+                            query_id.finish();
+                            debug!("Sending empty providers");
+                            if sender.send(Ok(HashSet::default())).is_err() {
+                                error!("Cannot send result");
+                            }
+                        } else {
+                            error!("could not find {} in the query ids", id);
+                            let err =
+                                ProviderError(format!("could not find {} in the query ids", id));
+                            debug!("Sending error");
+                            if sender.send(Err(Box::new(err))).is_err() {
+                                error!("Cannot send result");
+                            }
+                        }
+                    } else {
+                        error!("could not find {} in the providers", id);
+                    }
+                }
+            }
+            kad::QueryResult::GetRecord(Ok(get_record_ok)) => {
+                let value = match get_record_ok {
+                    kad::GetRecordOk::FoundRecord(record) => {
+                        info!("value found");
+                        record.record.value
+                    }
+                    kad::GetRecordOk::FinishedWithNoAdditionalRecord { .. } => {
+                        vec![]
+                    }
+                };
+
+                if let Some(sender) = self.pending_get_record.remove(&id) {
+                    debug!("Sending value {:?}", value);
+                    if sender.send(Ok(value)).is_err() {
+                        error!("Cannot send result");
+                    }
+                } else {
+                    error!("could not find {} in the get records", id);
+                }
+            }
+            kad::QueryResult::GetRecord(Err(err)) => {
+                error!("Failed to get record: {err:?}");
+                if let Some(sender) = self.pending_get_record.remove(&id) {
+                    debug!("Sending empty value");
+                    if sender.send(Ok(vec![])).is_err() {
+                        error!("Cannot send result");
+                    }
+                } else {
+                    error!("could not find {} in the get records", id);
+                }
+            }
+            kad::QueryResult::PutRecord(Ok(kad::PutRecordOk { .. })) => {
+                if let Some(sender) = self.pending_put_record.remove(&id) {
+                    debug!("Sending empty response");
+                    if sender.send(Ok(())).is_err() {
+                        error!("Cannot send result");
+                    }
+                } else {
+                    error!("could not find {} in the put records", id);
+                }
+            }
+            kad::QueryResult::PutRecord(Err(err)) => {
+                error!("Failed to put record: {err:?}");
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_request_response(
+        &mut self,
+        request_response: Event<FileRequest, FileResponse>,
+    ) {
+        match request_response {
+            Event::Message { message, .. } => match message {
+                Message::Request {
+                    request, channel, ..
+                } => {
+                    debug!("Sending inbound request '{}'", request.0);
+                    if let Err(se) = self
+                        .event_sender
+                        .send(DragoonEvent::InboundRequest {
+                            request: request.0,
+                            channel,
+                       })
+                        .await
+                    {
+                        error!("could not send inbound request: {}", se);
+                    }
+                }
+                Message::Response {
+                    request_id,
+                    response,
+                } => {
+                    debug!("Preparing response from request {}", request_id);
+                    if let Some(sender) = self.pending_request_file.remove(&request_id) {
+                        debug!("Sending response {:?}", response);
+                        if sender.send(Ok(response.0)).is_err() {
+                            error!("Could not send result");
+                        }
+                    } else {
+                        error!("could not find {} in the request files", request_id);
+                    }
+                }
+            },
+            Event::OutboundFailure {
+                request_id, error, ..
+            } => {
+                debug!("Request {} failed with {}", request_id, error);
+                if let Some(sender) = self.pending_request_file.remove(&request_id) {
+                    debug!("Sending error {}", error);
+                    if sender.send(Err(Box::new(error))).is_err() {
+                        error!("Could not send result");
+                    }
+                } else {
+                    error!("could not find {} in the request files", request_id);
+                }
+            }
+            e => warn!("[unknown event] {:?}", e),
+        }
+    }
+
     async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent>) {
         debug!("[event] {:?}", event);
         match event {
@@ -151,111 +309,7 @@ impl DragoonNetwork {
             },
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed { id, result, .. },
-            )) => match result {
-                kad::QueryResult::StartProviding(Ok(result_ok)) => {
-                    if let Some(sender) = self.pending_start_providing.remove(&id) {
-                        info!("Started providing {:?}", result_ok);
-                        debug!("Sending empty response");
-                        if sender.send(Ok(())).is_err() {
-                            error!("Could not send result");
-                        }
-                    } else {
-                        error!("Could not find id = {} in the start providers", id);
-                    }
-                }
-                kad::QueryResult::GetProviders(get_providers_result) => {
-                    if let Ok(res) = get_providers_result {
-                        match res {
-                            kad::GetProvidersOk::FoundProviders { providers, .. } => {
-                                info!("Found providers {:?}", providers);
-                                if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                    debug!("Sending providers: {:?}", providers);
-                                    if sender.send(Ok(providers)).is_err() {
-                                        error!("Cannot send result");
-                                    }
-                                } else {
-                                    error!("could not find {} in the providers", id);
-                                }
-                            }
-                            kad::GetProvidersOk::FinishedWithNoAdditionalRecord {
-                                closest_peers,
-                            } => {
-                                info!("Finished get providers {closest_peers:?}");
-                            }
-                        }
-                    } else {
-                        info!("Could not get the providers");
-                        if let Some(sender) = self.pending_get_providers.remove(&id) {
-                            if let Some(mut query_id) =
-                                self.swarm.behaviour_mut().kademlia.query_mut(&id)
-                            {
-                                query_id.finish();
-                                debug!("Sending empty providers");
-                                if sender.send(Ok(HashSet::default())).is_err() {
-                                    error!("Cannot send result");
-                                }
-                            } else {
-                                error!("could not find {} in the query ids", id);
-                                let err = ProviderError(format!(
-                                    "could not find {} in the query ids",
-                                    id
-                                ));
-                                debug!("Sending error");
-                                if sender.send(Err(Box::new(err))).is_err() {
-                                    error!("Cannot send result");
-                                }
-                            }
-                        } else {
-                            error!("could not find {} in the providers", id);
-                        }
-                    }
-                }
-                kad::QueryResult::GetRecord(Ok(get_record_ok)) => {
-                    let value = match get_record_ok {
-                        kad::GetRecordOk::FoundRecord(record) => {
-                            info!("value found");
-                            record.record.value
-                        }
-                        kad::GetRecordOk::FinishedWithNoAdditionalRecord { .. } => {
-                            vec![]
-                        }
-                    };
-
-                    if let Some(sender) = self.pending_get_record.remove(&id) {
-                        debug!("Sending value {:?}", value);
-                        if sender.send(Ok(value)).is_err() {
-                            error!("Cannot send result");
-                        }
-                    } else {
-                        error!("could not find {} in the get records", id);
-                    }
-                }
-                kad::QueryResult::GetRecord(Err(err)) => {
-                    error!("Failed to get record: {err:?}");
-                    if let Some(sender) = self.pending_get_record.remove(&id) {
-                        debug!("Sending empty value");
-                        if sender.send(Ok(vec![])).is_err() {
-                            error!("Cannot send result");
-                        }
-                    } else {
-                        error!("could not find {} in the get records", id);
-                    }
-                }
-                kad::QueryResult::PutRecord(Ok(kad::PutRecordOk { .. })) => {
-                    if let Some(sender) = self.pending_put_record.remove(&id) {
-                        debug!("Sending empty response");
-                        if sender.send(Ok(())).is_err() {
-                            error!("Cannot send result");
-                        }
-                    } else {
-                        error!("could not find {} in the put records", id);
-                    }
-                }
-                kad::QueryResult::PutRecord(Err(err)) => {
-                    error!("Failed to put record: {err:?}");
-                }
-                _ => {}
-            },
+            )) => self.handle_query_result(result, id).await,
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Sent {
                 peer_id,
                 ..
@@ -271,53 +325,8 @@ impl DragoonNetwork {
                     .add_address(&peer_id, info.listen_addrs.get(0).unwrap().clone());
                 info!("Added peer {}", peer_id);
             }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
-                request_response::Event::Message { message, .. },
-            )) => match message {
-                request_response::Message::Request {
-                    request, channel, ..
-                } => {
-                    debug!("Sending inbound request '{}'", request.0);
-                    if let Err(se) = self
-                        .event_sender
-                        .send(Event::InboundRequest {
-                            request: request.0,
-                            channel,
-                        })
-                        .await
-                    {
-                        error!("could not send inbound request: {}", se);
-                    }
-                }
-                request_response::Message::Response {
-                    request_id,
-                    response,
-                } => {
-                    debug!("Preparing response from request {}", request_id);
-                    if let Some(sender) = self.pending_request_file.remove(&request_id) {
-                        debug!("Sending response {:?}", response);
-                        if sender.send(Ok(response.0)).is_err() {
-                            error!("Could not send result");
-                        }
-                    } else {
-                        error!("could not find {} in the request files", request_id);
-                    }
-                }
-            },
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(
-                request_response::Event::OutboundFailure {
-                    request_id, error, ..
-                },
-            )) => {
-                debug!("Request {} failed with {}", request_id, error);
-                if let Some(sender) = self.pending_request_file.remove(&request_id) {
-                    debug!("Sending error {}", error);
-                    if sender.send(Err(Box::new(error))).is_err() {
-                        error!("Could not send result");
-                    }
-                } else {
-                    error!("could not find {} in the request files", request_id);
-                }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
+                self.handle_request_response(request_response);
             }
             e => warn!("[unknown event] {:?}", e),
         }
