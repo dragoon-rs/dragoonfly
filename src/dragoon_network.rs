@@ -232,6 +232,14 @@ impl DragoonNetwork {
                 }
                 kad::QueryResult::GetRecord(Err(err)) => {
                     error!("Failed to get record: {err:?}");
+                    if let Some(sender) = self.pending_get_record.remove(&id) {
+                        debug!("Sending empty value");
+                        if sender.send(Ok(vec![])).is_err() {
+                            error!("Cannot send result");
+                        }
+                    } else {
+                        error!("could not find {} in the get records", id);
+                    }
                 }
                 kad::QueryResult::PutRecord(Ok(kad::PutRecordOk { .. })) => {
                     if let Some(sender) = self.pending_put_record.remove(&id) {
