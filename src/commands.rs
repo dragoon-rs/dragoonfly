@@ -378,7 +378,10 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
 }
 
 #[cfg(feature = "file-sharing")]
-pub(crate) async fn get_file(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn get_file(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     info!("running command `get_file`");
     let providers = {
         let (sender, receiver) = oneshot::channel();
