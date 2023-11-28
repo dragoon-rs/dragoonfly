@@ -12,10 +12,10 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate
 use ark_std::test_rng;
 use rs_merkle::algorithms::Sha256;
 use rs_merkle::Hasher;
+use tracing::{debug, error, info, warn};
 
 use semi_avid_pc::verify;
 use semi_avid_pc::{commit, field, prove, setup::trim, Block};
-use tracing::{debug, info, warn, error};
 
 type UniPoly12_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 
