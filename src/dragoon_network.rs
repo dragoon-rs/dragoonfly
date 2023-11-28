@@ -334,7 +334,7 @@ impl DragoonNetwork {
             }
             #[cfg(feature = "file-sharing")]
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
-                self.handle_request_response(request_response);
+                self.handle_request_response(request_response).await;
             }
             e => warn!("[unknown event] {:?}", e),
         }
