@@ -12,13 +12,19 @@ export def "sap setup" [
     bytes: string,
     --powers-file: path = "powers.bin",
     --log-level: string@"nu-complete log-levels" = "INFO"
-] {
+]: nothing -> nothing {
     with-env {RUST_LOG: $log_level} {
-        ^cargo run [
-            --quiet -p semi-avid-pc
-            --
-            $bytes 0 0 "true" $powers_file "false"
-        ]
+        let code = {
+            ^cargo run [
+                --quiet -p semi-avid-pc
+                --
+                $bytes 0 0 "true" $powers_file "false"
+            ]
+        }
+
+        let res = do $code | complete
+        print $res.stdout
+        $res.stderr | from json
     }
 }
 
