@@ -15,6 +15,7 @@ export def "swarm create" [n: int]: nothing -> table {
 # run a swarm
 export def "swarm run" [
     swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to run
+    --features: list<string> = [] # features to include in the nodes
 ]: nothing -> nothing {
     if ($swarm | is-empty) {
         error make --unspanned {
@@ -26,14 +27,16 @@ export def "swarm run" [
 
     log info $"logging to `($log_dir)/*.log`"
 
-    ^cargo build --release
+    ^cargo build --release --features ($features | str join ",")
     mkdir $log_dir
     for node in $swarm {
         # FIXME: don't use Bash here
         log info $"launching node ($node.seed) \(($node.ip_port)\)"
-        ^bash -c $"
-            cargo run -- ($node.ip_port) ($node.seed) 1> ($log_dir)/($node.seed).log 2> /dev/null &
-        "
+        ^bash -c (
+            $"cargo run --features '($features | str join ',')' "
+          + $"-- ($node.ip_port) ($node.seed) "
+          + $"1> ($log_dir)/($node.seed).log 2> /dev/null &"
+        )
     }
     ^$nu.current-exe --execute $'
        $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
