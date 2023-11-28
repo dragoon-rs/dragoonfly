@@ -60,7 +60,6 @@ export def "sap verify" [
     }
 }
 
-
 export def "sap reconstruct" [
     ...blocks: path,
     --log-level: string@"nu-complete log-levels" = "INFO"
