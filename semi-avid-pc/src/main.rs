@@ -13,8 +13,9 @@ use ark_std::test_rng;
 use rs_merkle::algorithms::Sha256;
 use rs_merkle::Hasher;
 
+use semi_avid_pc::verify;
 use semi_avid_pc::{commit, field, prove, setup::trim, Block};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 
 type UniPoly12_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 
@@ -85,6 +86,7 @@ fn main() {
     let n: usize = std::env::args().nth(3).unwrap().parse().unwrap();
     let generate_powers: bool = std::env::args().nth(4).unwrap().parse().unwrap();
     let powers_file = std::env::args().nth(5).unwrap();
+    let verify_blocks: bool = std::env::args().nth(6).unwrap().parse().unwrap();
 
     const COMPRESS: Compress = Compress::Yes;
     const VALIDATE: Validate = Validate::Yes;
@@ -116,6 +118,27 @@ fn main() {
         info!("regenerating temporary powers");
         setup::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap()
     };
+
+    if verify_blocks {
+        for block in std::env::args().skip(7) {
+            let block_file = PathBuf::from(BLOCK_DIR).join(block);
+            if let Ok(serialized) = std::fs::read(&block_file) {
+                debug!("deserializing block from `{:?}`", block_file);
+                let block =
+                    Block::<Bls12_381>::deserialize_with_mode(&serialized[..], COMPRESS, VALIDATE)
+                        .unwrap();
+                if verify::<Bls12_381, UniPoly12_381>(&block, &powers) {
+                    info!("block `{:?} is valid`", block_file);
+                } else {
+                    error!("block `{:?} is not valid`", block_file);
+                }
+            } else {
+                warn!("could not read from `{:?}`", block_file);
+            }
+        }
+
+        exit(0);
+    }
 
     let blocks = run::<Bls12_381, UniPoly12_381>(&bytes, k, n, powers).unwrap();
 
