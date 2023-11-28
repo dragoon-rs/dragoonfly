@@ -7,6 +7,7 @@ use ark_poly_commit::kzg10::{Commitment, Powers, Randomness, KZG10};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
+pub mod fec;
 pub mod field;
 pub mod setup;
 
