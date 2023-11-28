@@ -62,7 +62,7 @@ fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, Vec<String>) {
     )
 }
 
-fn generate_powers(bytes: &[u8], powers_file: &str) {
+fn generate_powers(bytes: &[u8], powers_file: &str) -> Result<(), std::io::Error> {
     info!("generating new powers");
     let powers = setup::random::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap();
 
@@ -73,11 +73,16 @@ fn generate_powers(bytes: &[u8], powers_file: &str) {
         .unwrap();
 
     info!("dumping powers into `{}`", powers_file);
-    let mut file = File::create(&powers_file).unwrap();
-    file.write_all(&serialized).unwrap();
+    let mut file = File::create(&powers_file)?;
+    file.write_all(&serialized)?;
+
+    Ok(())
 }
 
-fn verify_blocks<E, P>(block_files: &[String], powers: Powers<E>)
+fn verify_blocks<E, P>(
+    block_files: &[String],
+    powers: Powers<E>,
+) -> Result<(), ark_serialize::SerializationError>
 where
     E: Pairing,
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
@@ -87,8 +92,7 @@ where
         let block_file = PathBuf::from(BLOCK_DIR).join(block);
         if let Ok(serialized) = std::fs::read(&block_file) {
             debug!("deserializing block from `{:?}`", block_file);
-            let block =
-                Block::<E>::deserialize_with_mode(&serialized[..], COMPRESS, VALIDATE).unwrap();
+            let block = Block::<E>::deserialize_with_mode(&serialized[..], COMPRESS, VALIDATE)?;
             if verify::<E, P>(&block, &powers) {
                 info!("block `{:?} is valid`", block_file);
             } else {
@@ -98,13 +102,15 @@ where
             warn!("could not read from `{:?}`", block_file);
         }
     }
+
+    Ok(())
 }
 
-fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) {
+fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) -> Result<(), std::io::Error> {
     info!("dumping blocks to `{}`", BLOCK_DIR);
     for (i, block) in blocks.iter().enumerate() {
         let filename = PathBuf::from(BLOCK_DIR).join(format!("{}.bin", i));
-        std::fs::create_dir_all(BLOCK_DIR).unwrap();
+        std::fs::create_dir_all(BLOCK_DIR)?;
 
         debug!("serializing block {}", i);
         let mut serialized = vec![0; block.serialized_size(COMPRESS)];
@@ -113,9 +119,11 @@ fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) {
             .unwrap();
 
         debug!("dumping serialized block to `{:?}`", filename);
-        let mut file = File::create(&filename).unwrap();
-        file.write_all(&serialized).unwrap();
+        let mut file = File::create(&filename)?;
+        file.write_all(&serialized)?;
     }
+
+    Ok(())
 }
 
 fn main() {
@@ -125,7 +133,7 @@ fn main() {
         parse_args();
 
     if do_generate_powers {
-        generate_powers(&bytes, &powers_file);
+        generate_powers(&bytes, &powers_file).unwrap();
         exit(0);
     }
 
@@ -140,9 +148,9 @@ fn main() {
     };
 
     if do_verify_blocks {
-        verify_blocks::<Bls12_381, UniPoly12_381>(&block_files, powers);
+        verify_blocks::<Bls12_381, UniPoly12_381>(&block_files, powers).unwrap();
         exit(0);
     }
 
-    dump_blocks(&encode::<Bls12_381, UniPoly12_381>(&bytes, k, n, powers).unwrap());
+    dump_blocks(&encode::<Bls12_381, UniPoly12_381>(&bytes, k, n, powers).unwrap()).unwrap();
 }
