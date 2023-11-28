@@ -17,12 +17,13 @@ pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     }
 
     ReedSolomonNonSystematic::<F>::vandermonde(k as usize, n as usize)?.reconstruct(&mut shards)?;
-    let elements: Vec<_> = shards.iter().filter_map(|x| x.clone()).flatten().collect();
 
-    Ok(elements
+    Ok(shards
         .iter()
+        .filter_map(|x| x.clone())
+        .flatten()
         .take(blocks[0].size)
-        .map(|e| F::into_data(&[*e])[0])
+        .map(|e| F::into_data(&[e])[0])
         .collect::<Vec<_>>())
 }
 
