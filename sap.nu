@@ -8,11 +8,8 @@ def "nu-complete log-levels" []: nothing -> list<string> {
     ]
 }
 
-export def "sap prove" [
+export def "sap setup" [
     bytes: string,
-    k: int,
-    n: int,
-    --generate-powers,
     --powers-file: path = "powers.bin",
     --log-level: string@"nu-complete log-levels" = "INFO"
 ] {
@@ -20,14 +17,29 @@ export def "sap prove" [
         ^cargo run [
             --quiet -p semi-avid-pc
             --
-            $bytes $k $n ($generate_powers | into string) $powers_file "false"
+            $bytes 0 0 "true" $powers_file "false"
+        ]
+    }
+}
+
+export def "sap prove" [
+    bytes: string,
+    k: int,
+    n: int,
+    --powers-file: path = "powers.bin",
+    --log-level: string@"nu-complete log-levels" = "INFO"
+] {
+    with-env {RUST_LOG: $log_level} {
+        ^cargo run [
+            --quiet -p semi-avid-pc
+            --
+            $bytes $k $n "false" $powers_file "false"
         ]
     }
 }
 
 export def "sap verify" [
     ...blocks: path,
-    --generate-powers,
     --powers-file: path = "powers.bin",
     --log-level: string@"nu-complete log-levels" = "INFO"
 ] {
@@ -35,7 +47,7 @@ export def "sap verify" [
         ^cargo run ([
             --quiet -p semi-avid-pc
             --
-            "" 0 0 ($generate_powers | into string) $powers_file "true"
+            "" 0 0 "false" $powers_file "true"
         ] | append $blocks)
     }
 }
