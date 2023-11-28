@@ -21,9 +21,10 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
     let (cmd_sender, cmd_receiver) = mpsc::channel(0);
+    #[cfg(feature = "file-sharing")]
     let (event_sender, event_receiver) = mpsc::channel(0);
 
-    let app = Router::new()
+    let router = Router::new()
         .route("/listen/:addr", get(commands::listen))
         .route("/get-listeners", get(commands::get_listeners))
         .route("/get-peer-id", get(commands::get_peer_id))
@@ -35,11 +36,19 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/start-provide/:key", get(commands::start_provide))
         .route("/get-providers/:key", get(commands::get_providers))
         .route("/bootstrap", get(commands::bootstrap))
-        .route("/get/:key", get(commands::get))
-        .route("/add-file/:key/:content", get(commands::add_file))
         .route("/put-record/:key/:value", get(commands::put_record))
-        .route("/get-record/:key", get(commands::get_record))
-        .with_state(Arc::new(app::AppState::new(cmd_sender, event_receiver)));
+        .route("/get-record/:key", get(commands::get_record));
+
+    #[cfg(feature = "file-sharing")]
+    let router = router
+        .route("/get/:key", get(commands::get))
+        .route("/add-file/:key/:content", get(commands::add_file));
+
+    let router = router.with_state(Arc::new(app::AppState::new(
+        cmd_sender,
+        #[cfg(feature = "file-sharing")]
+        event_receiver,
+    )));
 
     let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {
         ip_port
@@ -55,7 +64,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         0
     };
 
-    let http_server = axum::Server::bind(&ip_port).serve(app.into_make_service());
+    let http_server = axum::Server::bind(&ip_port).serve(router.into_make_service());
     tokio::spawn(http_server);
 
     let kp = get_keypair(id);
@@ -63,7 +72,12 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     info!("Peer ID: {} ({})", kp.public().to_peer_id(), id);
 
     let swarm = dragoon_network::create_swarm(kp).await?;
-    let network = DragoonNetwork::new(swarm, cmd_receiver, event_sender);
+    let network = DragoonNetwork::new(
+        swarm,
+        cmd_receiver,
+        #[cfg(feature = "file-sharing")]
+        event_sender,
+    );
     tokio::spawn(network.run());
 
     let shutdown = signal::ctrl_c();

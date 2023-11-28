@@ -4,6 +4,7 @@ use futures::prelude::*;
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::kad::{QueryId, QueryResult};
+#[cfg(feature = "file-sharing")]
 use libp2p::request_response::{Event, Message, OutboundRequestId, ResponseChannel};
 use libp2p::{
     core::Multiaddr,
@@ -67,6 +68,7 @@ pub(crate) async fn create_swarm(
     Ok(swarm)
 }
 
+#[cfg(feature = "file-sharing")]
 #[derive(Debug)]
 pub(crate) enum DragoonEvent {
     InboundRequest {
@@ -85,12 +87,14 @@ pub(crate) struct DragoonBehaviour {
 pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
+    #[cfg(feature = "file-sharing")]
     event_sender: mpsc::Sender<DragoonEvent>,
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing:
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_get_providers:
         HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
+    #[cfg(feature = "file-sharing")]
     pending_request_file:
         HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
     pending_put_record: HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
@@ -102,15 +106,17 @@ impl DragoonNetwork {
     pub fn new(
         swarm: Swarm<DragoonBehaviour>,
         command_receiver: mpsc::Receiver<DragoonCommand>,
-        event_sender: mpsc::Sender<DragoonEvent>,
+        #[cfg(feature = "file-sharing")] event_sender: mpsc::Sender<DragoonEvent>,
     ) -> Self {
         Self {
             swarm,
             command_receiver,
+            #[cfg(feature = "file-sharing")]
             event_sender,
             listeners: HashMap::new(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
+            #[cfg(feature = "file-sharing")]
             pending_request_file: Default::default(),
             pending_put_record: Default::default(),
             pending_get_record: Default::default(),
@@ -234,6 +240,7 @@ impl DragoonNetwork {
         }
     }
 
+    #[cfg(feature = "file-sharing")]
     async fn handle_request_response(
         &mut self,
         request_response: Event<FileRequest, FileResponse>,
@@ -325,6 +332,7 @@ impl DragoonNetwork {
                     .add_address(&peer_id, info.listen_addrs.get(0).unwrap().clone());
                 info!("Added peer {}", peer_id);
             }
+            #[cfg(feature = "file-sharing")]
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
                 self.handle_request_response(request_response);
             }
@@ -549,6 +557,7 @@ impl DragoonNetwork {
                     }
                 }
             }
+            #[cfg(feature = "file-sharing")]
             DragoonCommand::Get { key, peer, sender } => {
                 let request_id = self
                     .swarm
@@ -557,6 +566,7 @@ impl DragoonNetwork {
                     .send_request(&peer, FileRequest(key));
                 self.pending_request_file.insert(request_id, sender);
             }
+            #[cfg(feature = "file-sharing")]
             DragoonCommand::AddFile { file, channel } => {
                 if self
                     .swarm

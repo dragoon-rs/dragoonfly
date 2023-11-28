@@ -2,7 +2,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot::{self, Canceled};
-use futures::{SinkExt, StreamExt};
+use futures::SinkExt;
+#[cfg(feature = "file-sharing")]
+use futures::StreamExt;
+#[cfg(feature = "file-sharing")]
 use libp2p::request_response::ResponseChannel;
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
@@ -10,9 +13,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+#[cfg(feature = "file-sharing")]
+use tracing::debug;
+use tracing::{error, info};
 
 use crate::app::AppState;
+#[cfg(feature = "file-sharing")]
 use crate::dragoon_network::{DragoonEvent, FileResponse};
 use crate::error::DragoonError;
 
@@ -71,11 +77,13 @@ pub(crate) enum DragoonCommand {
     Bootstrap {
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
+    #[cfg(feature = "file-sharing")]
     Get {
         key: String,
         peer: PeerId,
         sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
     },
+    #[cfg(feature = "file-sharing")]
     AddFile {
         file: Vec<u8>,
         channel: ResponseChannel<FileResponse>,
@@ -105,7 +113,9 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
+            #[cfg(feature = "file-sharing")]
             DragoonCommand::Get { .. } => write!(f, "get"),
+            #[cfg(feature = "file-sharing")]
             DragoonCommand::AddFile { .. } => write!(f, "add-file"),
             DragoonCommand::PutRecord { .. } => write!(f, "put-record"),
             DragoonCommand::GetRecord { .. } => write!(f, "get-record"),
@@ -367,6 +377,7 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
+#[cfg(feature = "file-sharing")]
 pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
     info!("running command `get`");
     let providers = {
@@ -410,6 +421,7 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
     }
 }
 
+#[cfg(feature = "file-sharing")]
 pub(crate) async fn add_file(
     Path((key, content)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,

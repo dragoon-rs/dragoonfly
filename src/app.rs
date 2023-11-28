@@ -1,17 +1,26 @@
-use futures::channel::mpsc::{Receiver, Sender};
+use futures::channel::mpsc::Sender;
+#[cfg(feature = "file-sharing")]
+use futures::channel::mpsc::Receiver;
 use tokio::sync::Mutex;
 
-use crate::{commands::DragoonCommand, dragoon_network::DragoonEvent};
+#[cfg(feature = "file-sharing")]
+use crate::dragoon_network::DragoonEvent;
+use crate::commands::DragoonCommand;
 
 pub(crate) struct AppState {
     pub sender: Mutex<Sender<DragoonCommand>>,
+    #[cfg(feature = "file-sharing")]
     pub event_receiver: Mutex<Receiver<DragoonEvent>>,
 }
 
 impl AppState {
-    pub fn new(sender: Sender<DragoonCommand>, event_receiver: Receiver<DragoonEvent>) -> Self {
+    pub fn new(
+        sender: Sender<DragoonCommand>,
+        #[cfg(feature = "file-sharing")] event_receiver: Receiver<DragoonEvent>,
+    ) -> Self {
         AppState {
             sender: Mutex::new(sender),
+            #[cfg(feature = "file-sharing")]
             event_receiver: Mutex::new(event_receiver),
         }
     }
