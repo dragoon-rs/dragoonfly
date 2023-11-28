@@ -6,22 +6,11 @@ use ark_poly::DenseUVPolynomial;
 use ark_poly_commit::kzg10::{Commitment, Powers, Randomness, KZG10};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use serde::{Deserialize, Serialize};
 
-mod ark_ser;
 pub mod field;
 pub mod setup;
 
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-)]
+#[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Shard {
     /// the number of required shards for reconstruction
     k: u32,
@@ -35,19 +24,9 @@ pub struct Shard {
     size: usize,
 }
 
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-)]
+#[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Block<E: Pairing> {
     shard: Shard,
-    #[serde(with = "ark_ser")]
     commit: Vec<Commitment<E>>,
     m: usize,
 }
@@ -359,31 +338,5 @@ mod tests {
             .expect("verification failed for bls12-381");
         verify_with_errors_template::<Bls12_381, UniPoly381>(&bytes[0..(bytes.len() - 10)], 4, 6)
             .expect("verification failed for bls12-381 with padding");
-    }
-
-    #[test]
-    fn serde_json() {
-        let (blocks, _) = test_setup::<Bls12_381, UniPoly381>(&bytes::<Bls12_381>(8, 2), 8, 16)
-            .expect("proof failed for bls12-381");
-        let block = blocks.get(0).unwrap();
-
-        let ser = serde_json::to_string(&block).unwrap();
-
-        let deser_block: Block<Bls12_381> = serde_json::from_str(ser.as_str()).unwrap();
-
-        assert_eq!(&deser_block, block)
-    }
-
-    #[test]
-    fn serde_bincode() {
-        let (blocks, _) = test_setup::<Bls12_381, UniPoly381>(&bytes::<Bls12_381>(8, 2), 8, 16)
-            .expect("proof failed for bls12-381");
-        let block = blocks.get(0).unwrap();
-
-        let ser = bincode::serialize(&block).unwrap();
-
-        let deser_block: Block<Bls12_381> = bincode::deserialize(&ser).unwrap();
-
-        assert_eq!(&deser_block, block)
     }
 }
