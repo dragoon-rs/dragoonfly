@@ -29,7 +29,7 @@ pub struct Shard {
 
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Block<E: Pairing> {
-    shard: Shard,
+    pub shard: Shard,
     commit: Vec<Commitment<E>>,
     m: usize,
 }

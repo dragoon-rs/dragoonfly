@@ -25,7 +25,7 @@ export def "sap setup" [
         ^cargo run [
             --quiet -p semi-avid-pc
             --
-            $bytes 0 0 "true" $powers_file "false"
+            $bytes 0 0 "true" $powers_file "false" "false"
         ]
     }
 }
@@ -41,7 +41,7 @@ export def "sap prove" [
         ^cargo run [
             --quiet -p semi-avid-pc
             --
-            $bytes $k $n "false" $powers_file "false"
+            $bytes $k $n "false" $powers_file "false" "false"
         ]
     }
 }
@@ -55,7 +55,21 @@ export def "sap verify" [
         ^cargo run ([
             --quiet -p semi-avid-pc
             --
-            "" 0 0 "false" $powers_file "true"
+            "" 0 0 "false" $powers_file "false" "true"
+        ] | append $blocks)
+    }
+}
+
+
+export def "sap reconstruct" [
+    ...blocks: path,
+    --log-level: string@"nu-complete log-levels" = "INFO"
+]: nothing -> list<int> {
+    run-sap --log-level $log_level {
+        ^cargo run ([
+            --quiet -p semi-avid-pc
+            --
+            "" 0 0 "false" "" "true" "false"
         ] | append $blocks)
     }
 }

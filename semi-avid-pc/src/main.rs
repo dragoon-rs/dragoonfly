@@ -9,6 +9,8 @@ use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly_commit::kzg10::Powers;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
+use reed_solomon_erasure::galois_prime::Field as GF;
+use semi_avid_pc::fec::decode;
 use tracing::{debug, error, info, warn};
 
 use semi_avid_pc::verify;
@@ -20,7 +22,7 @@ const COMPRESS: Compress = Compress::Yes;
 const VALIDATE: Validate = Validate::Yes;
 const BLOCK_DIR: &str = "blocks/";
 
-fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, Vec<String>) {
+fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, bool, Vec<String>) {
     let bytes = std::env::args()
         .nth(1)
         .expect("expected bytes as first positional argument")
@@ -44,12 +46,17 @@ fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, Vec<String>) {
     let powers_file = std::env::args()
         .nth(5)
         .expect("expected powers_file as fifth positional argument");
-    let do_verify_blocks: bool = std::env::args()
+    let do_reconstruct_data: bool = std::env::args()
         .nth(6)
-        .expect("expected do_verify_blocks as sixth positional argument")
+        .expect("expected do_reconstruct_data as sixth positional argument")
+        .parse()
+        .expect("could not parse do_reconstruct_data as a bool");
+    let do_verify_blocks: bool = std::env::args()
+        .nth(7)
+        .expect("expected do_verify_blocks as seventh positional argument")
         .parse()
         .expect("could not parse do_verify_blocks as a bool");
-    let block_files = std::env::args().skip(7).collect::<Vec<_>>();
+    let block_files = std::env::args().skip(8).collect::<Vec<_>>();
 
     (
         bytes,
@@ -57,6 +64,7 @@ fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, Vec<String>) {
         n,
         do_generate_powers,
         powers_file,
+        do_reconstruct_data,
         do_verify_blocks,
         block_files,
     )
@@ -109,7 +117,7 @@ where
 
     eprint!("[");
     for (block, status) in block_files.iter().zip(res.iter()) {
-        eprint!("{{block: {:?}, status: {}}}",block, status);
+        eprint!("{{block: {:?}, status: {}}}", block, status);
     }
     eprint!("]");
 
@@ -148,11 +156,34 @@ fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) -> Result<(), std::io::Error> {
 fn main() {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
-    let (bytes, k, n, do_generate_powers, powers_file, do_verify_blocks, block_files) =
-        parse_args();
+    let (
+        bytes,
+        k,
+        n,
+        do_generate_powers,
+        powers_file,
+        do_reconstruct_data,
+        do_verify_blocks,
+        block_files,
+    ) = parse_args();
 
     if do_generate_powers {
         generate_powers(&bytes, &powers_file).unwrap();
+        exit(0);
+    }
+
+    if do_reconstruct_data {
+        let blocks = block_files
+            .iter()
+            .filter_map(|f| std::fs::read(&f).ok())
+            .map(|s| {
+                Block::<Bls12_381>::deserialize_with_mode(&s[..], COMPRESS, VALIDATE)
+                    .unwrap()
+                    .shard
+            })
+            .collect::<Vec<_>>();
+        eprintln!("{:?}", decode::<GF>(blocks).unwrap());
+
         exit(0);
     }
 
