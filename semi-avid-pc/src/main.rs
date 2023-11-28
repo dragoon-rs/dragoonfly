@@ -88,6 +88,8 @@ where
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
     for<'a, 'b> &'a P: Div<&'b P, Output = P>,
 {
+    let mut res = vec![];
+
     for block in block_files {
         let block_file = PathBuf::from(BLOCK_DIR).join(block);
         if let Ok(serialized) = std::fs::read(&block_file) {
@@ -95,19 +97,29 @@ where
             let block = Block::<E>::deserialize_with_mode(&serialized[..], COMPRESS, VALIDATE)?;
             if verify::<E, P>(&block, &powers) {
                 info!("block `{:?} is valid`", block_file);
+                res.push(0);
             } else {
                 error!("block `{:?} is not valid`", block_file);
+                res.push(1);
             }
         } else {
             warn!("could not read from `{:?}`", block_file);
+            res.push(2);
         }
     }
+
+    eprint!("[");
+    for (block, status) in block_files.iter().zip(res.iter()) {
+        eprint!("{{block: {:?}, status: {}}}",block, status);
+    }
+    eprint!("]");
 
     Ok(())
 }
 
 fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) -> Result<(), std::io::Error> {
     info!("dumping blocks to `{}`", BLOCK_DIR);
+    let mut block_files = vec![];
     for (i, block) in blocks.iter().enumerate() {
         let filename = PathBuf::from(BLOCK_DIR).join(format!("{}.bin", i));
         std::fs::create_dir_all(BLOCK_DIR)?;
@@ -121,7 +133,15 @@ fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) -> Result<(), std::io::Error> {
         debug!("dumping serialized block to `{:?}`", filename);
         let mut file = File::create(&filename)?;
         file.write_all(&serialized)?;
+
+        block_files.push(filename);
     }
+
+    eprint!("[");
+    for block_file in &block_files {
+        eprint!("{:?},", block_file);
+    }
+    eprint!("]");
 
     Ok(())
 }
