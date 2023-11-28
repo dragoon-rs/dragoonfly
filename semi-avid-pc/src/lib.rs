@@ -8,7 +8,7 @@ use ark_poly_commit::kzg10::{Commitment, Powers, Randomness, KZG10};
 use serde::{Deserialize, Serialize};
 
 mod ark_ser;
-mod field;
+pub mod field;
 pub mod setup;
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
