@@ -20,6 +20,48 @@ const COMPRESS: Compress = Compress::Yes;
 const VALIDATE: Validate = Validate::Yes;
 const BLOCK_DIR: &str = "blocks/";
 
+fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, Vec<String>) {
+    let bytes = std::env::args()
+        .nth(1)
+        .expect("expected bytes as first positional argument")
+        .as_bytes()
+        .to_vec();
+    let k: usize = std::env::args()
+        .nth(2)
+        .expect("expected k as second positional argument")
+        .parse()
+        .expect("could not parse k as an int");
+    let n: usize = std::env::args()
+        .nth(3)
+        .expect("expected n as third positional argument")
+        .parse()
+        .expect("could not parse n as an int");
+    let do_generate_powers: bool = std::env::args()
+        .nth(4)
+        .expect("expected do_generate_powers as fourth positional argument")
+        .parse()
+        .expect("could not parse do_generate_powers as a bool");
+    let powers_file = std::env::args()
+        .nth(5)
+        .expect("expected powers_file as fifth positional argument");
+    let do_verify_blocks: bool = std::env::args()
+        .nth(6)
+        .expect("expected do_verify_blocks as sixth positional argument")
+        .parse()
+        .expect("could not parse do_verify_blocks as a bool");
+    let block_files = std::env::args().skip(7).collect::<Vec<_>>();
+
+    (
+        bytes,
+        k,
+        n,
+        do_generate_powers,
+        powers_file,
+        do_verify_blocks,
+        block_files,
+    )
+}
+
 fn generate_powers(bytes: &[u8], powers_file: &str) {
     info!("generating new powers");
     let powers = setup::random::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap();
@@ -79,12 +121,8 @@ fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) {
 fn main() {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
-    let bytes = std::env::args().nth(1).unwrap().as_bytes().to_vec();
-    let k: usize = std::env::args().nth(2).unwrap().parse().unwrap();
-    let n: usize = std::env::args().nth(3).unwrap().parse().unwrap();
-    let do_generate_powers: bool = std::env::args().nth(4).unwrap().parse().unwrap();
-    let powers_file = std::env::args().nth(5).unwrap();
-    let do_verify_blocks: bool = std::env::args().nth(6).unwrap().parse().unwrap();
+    let (bytes, k, n, do_generate_powers, powers_file, do_verify_blocks, block_files) =
+        parse_args();
 
     if do_generate_powers {
         generate_powers(&bytes, &powers_file);
@@ -102,10 +140,7 @@ fn main() {
     };
 
     if do_verify_blocks {
-        verify_blocks::<Bls12_381, UniPoly12_381>(
-            &std::env::args().skip(7).collect::<Vec<_>>(),
-            powers,
-        );
+        verify_blocks::<Bls12_381, UniPoly12_381>(&block_files, powers);
         exit(0);
     }
 
