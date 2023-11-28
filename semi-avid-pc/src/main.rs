@@ -1,6 +1,6 @@
-use std::fs::File;
 use std::io::prelude::*;
 use std::ops::Div;
+use std::{fs::File, path::PathBuf};
 
 use ark_bls12_381::Bls12_381;
 use ark_ec::pairing::Pairing;
@@ -83,10 +83,11 @@ fn main() {
     let k: usize = std::env::args().nth(2).unwrap().parse().unwrap();
     let n: usize = std::env::args().nth(3).unwrap().parse().unwrap();
     let generate_powers: bool = std::env::args().nth(4).unwrap().parse().unwrap();
-    let powers_file = std::env::args().nth(5).unwrap_or("powers.bin".to_string());
+    let powers_file = std::env::args().nth(5).unwrap();
 
     const COMPRESS: Compress = Compress::Yes;
     const VALIDATE: Validate = Validate::Yes;
+    const BLOCK_DIR: &str = "blocks/";
 
     if generate_powers {
         info!("generating new powers");
@@ -115,17 +116,18 @@ fn main() {
 
     let blocks = run::<Bls12_381, UniPoly12_381>(&bytes, k, n, powers).unwrap();
 
+    info!("dumping blocks to `{}`", BLOCK_DIR);
     for (i, block) in blocks.iter().enumerate() {
-        let filename = format!("blocks/block_{}.bin", i);
-        std::fs::create_dir_all("blocks/").unwrap();
+        let filename = PathBuf::from(BLOCK_DIR).join(format!("{}.bin", i));
+        std::fs::create_dir_all(BLOCK_DIR).unwrap();
 
-        info!("serializing block {}", i);
+        debug!("serializing block {}", i);
         let mut serialized = vec![0; block.serialized_size(COMPRESS)];
         block
             .serialize_with_mode(&mut serialized[..], COMPRESS)
             .unwrap();
 
-        info!("dumping serialized block to `{}`", filename);
+        debug!("dumping serialized block to `{:?}`", filename);
         let mut file = File::create(&filename).unwrap();
         file.write_all(&serialized).unwrap();
     }
