@@ -90,10 +90,9 @@ where
 {
     let mut res = vec![];
 
-    for block in block_files {
-        let block_file = PathBuf::from(BLOCK_DIR).join(block);
+    for block_file in block_files {
         if let Ok(serialized) = std::fs::read(&block_file) {
-            debug!("deserializing block from `{:?}`", block_file);
+            debug!("deserializing block from `{}`", block_file);
             let block = Block::<E>::deserialize_with_mode(&serialized[..], COMPRESS, VALIDATE)?;
             if verify::<E, P>(&block, &powers) {
                 info!("block `{:?} is valid`", block_file);
