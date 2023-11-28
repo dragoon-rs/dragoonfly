@@ -7,33 +7,16 @@ use ark_bls12_381::Bls12_381;
 use ark_ec::pairing::Pairing;
 use ark_ff::PrimeField;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
-use ark_poly_commit::kzg10::{Powers, KZG10};
+use ark_poly_commit::kzg10::Powers;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
-use ark_std::test_rng;
 use rs_merkle::algorithms::Sha256;
 use rs_merkle::Hasher;
 use tracing::{debug, error, info, warn};
 
 use semi_avid_pc::verify;
-use semi_avid_pc::{commit, field, prove, setup::trim, Block};
+use semi_avid_pc::{commit, field, prove, setup, Block};
 
 type UniPoly12_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
-
-fn setup<E, P>(nb_bytes: usize) -> Result<Powers<'static, E>, ark_poly_commit::Error>
-where
-    E: Pairing,
-    P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
-    for<'a, 'b> &'a P: Div<&'b P, Output = P>,
-{
-    let degree = nb_bytes / (E::ScalarField::MODULUS_BIT_SIZE as usize / 8);
-
-    let rng = &mut test_rng();
-
-    let params = KZG10::<E, P>::setup(degree, false, rng)?;
-    let (powers, _) = trim(params, degree)?;
-
-    Ok(powers)
-}
 
 fn run<E, P>(
     bytes: &[u8],
@@ -94,7 +77,7 @@ fn main() {
 
     if generate_powers {
         info!("generating new powers");
-        let powers = setup::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap();
+        let powers = setup::random::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap();
 
         info!("serializing powers");
         let mut serialized = vec![0; powers.serialized_size(COMPRESS)];
@@ -116,7 +99,7 @@ fn main() {
     } else {
         warn!("could not read powers from `{}`", powers_file);
         info!("regenerating temporary powers");
-        setup::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap()
+        setup::random::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap()
     };
 
     if verify_blocks {

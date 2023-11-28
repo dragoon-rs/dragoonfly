@@ -1,5 +1,10 @@
+use std::ops::Div;
+
 use ark_ec::pairing::Pairing;
-use ark_poly_commit::kzg10::{Powers, UniversalParams, VerifierKey};
+use ark_ff::PrimeField;
+use ark_poly::DenseUVPolynomial;
+use ark_poly_commit::kzg10::{Powers, UniversalParams, VerifierKey, KZG10};
+use ark_std::test_rng;
 
 /// Specializes the public parameters for a given maximum degree `d` for polynomials
 /// `d` should be less that `pp.max_degree()`.
@@ -28,4 +33,20 @@ pub fn trim<E: Pairing>(
     };
 
     Ok((powers, vk))
+}
+
+pub fn random<E, P>(nb_bytes: usize) -> Result<Powers<'static, E>, ark_poly_commit::Error>
+where
+    E: Pairing,
+    P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
+    for<'a, 'b> &'a P: Div<&'b P, Output = P>,
+{
+    let degree = nb_bytes / (E::ScalarField::MODULUS_BIT_SIZE as usize / 8);
+
+    let rng = &mut test_rng();
+
+    let params = KZG10::<E, P>::setup(degree, false, rng)?;
+    let (powers, _) = trim(params, degree)?;
+
+    Ok(powers)
 }
