@@ -10,7 +10,7 @@ use rs_merkle::Hasher;
 use tracing::{debug, info};
 
 pub mod fec;
-pub mod field;
+mod field;
 pub mod setup;
 
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]

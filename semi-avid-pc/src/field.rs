@@ -8,7 +8,7 @@ use ark_std::Zero;
 ///
 /// [`split_data_into_field_elements`] supports padding the output vector of
 /// elements by giving a number that needs to divide the length of the vector.
-pub fn split_data_into_field_elements<E: Pairing>(
+pub(crate) fn split_data_into_field_elements<E: Pairing>(
     bytes: &[u8],
     modulus: usize,
 ) -> Vec<E::ScalarField> {
@@ -57,7 +57,7 @@ pub fn split_data_into_field_elements<E: Pairing>(
 // - *P_0*: 0, 3, 6 and 9 all satifsy *j % 3 == 0*
 // - *P_1*: 1, 4, 7 and 10 all satifsy *j % 3 == 1*
 // - *P_2*: 2, 5, 8 and 11 all satifsy *j % 3 == 2*
-pub fn build_interleaved_polynomials<E, P>(
+pub(crate) fn build_interleaved_polynomials<E, P>(
     elements: &[E::ScalarField],
     nb_polynomials: usize,
 ) -> Vec<P>
