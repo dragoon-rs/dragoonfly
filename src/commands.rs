@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::app::AppState;
-use crate::dragoon_network::{FileResponse, DragoonEvent};
+use crate::dragoon_network::{DragoonEvent, FileResponse};
 use crate::error::DragoonError;
 
 // Potential other commands:

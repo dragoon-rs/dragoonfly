@@ -249,7 +249,7 @@ impl DragoonNetwork {
                         .send(DragoonEvent::InboundRequest {
                             request: request.0,
                             channel,
-                       })
+                        })
                         .await
                     {
                         error!("could not send inbound request: {}", se);
