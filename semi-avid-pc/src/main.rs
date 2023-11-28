@@ -1,5 +1,6 @@
 use std::io::prelude::*;
 use std::ops::Div;
+use std::process::exit;
 use std::{fs::File, path::PathBuf};
 
 use ark_bls12_381::Bls12_381;
@@ -102,6 +103,8 @@ fn main() {
         info!("dumping powers into `{}`", powers_file);
         let mut file = File::create(&powers_file).unwrap();
         file.write_all(&serialized).unwrap();
+
+        exit(0);
     }
 
     info!("reading powers from file `{}`", powers_file);
