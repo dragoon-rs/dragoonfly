@@ -38,7 +38,18 @@ mod tests {
 
     const DATA: &[u8] = b"foobarbaz";
 
-    fn bar(i: &[u8]) -> <Bls12_381 as Pairing>::ScalarField {
+    const SHARDS: [[u32; 3]; 7] = [
+        [102u32, 111u32, 111u32],
+        [298u32, 305u32, 347u32],
+        [690u32, 693u32, 827u32],
+        [1278u32, 1275u32, 1551u32],
+        [2062u32, 2051u32, 2519u32],
+        [3042u32, 3021u32, 3731u32],
+        [4218u32, 4185u32, 5187u32],
+    ];
+    const LOST_SHARDS: [usize; 3] = [1, 3, 6];
+
+    fn to_big_int_from_bytes(i: &[u8]) -> <Bls12_381 as Pairing>::ScalarField {
         <Bls12_381 as Pairing>::ScalarField::from_le_bytes_mod_order(i)
     }
 
@@ -46,44 +57,17 @@ mod tests {
     fn decoding() {
         let hash = Sha256::hash(DATA).to_vec();
 
-        let mut shards = [
-            Some([
-                bar(&102u32.to_le_bytes()),
-                bar(&111u32.to_le_bytes()),
-                bar(&111u32.to_le_bytes()),
-            ]),
-            Some([
-                bar(&298u32.to_le_bytes()),
-                bar(&305u32.to_le_bytes()),
-                bar(&347u32.to_le_bytes()),
-            ]),
-            Some([
-                bar(&690u32.to_le_bytes()),
-                bar(&693u32.to_le_bytes()),
-                bar(&827u32.to_le_bytes()),
-            ]),
-            Some([
-                bar(&1278u32.to_le_bytes()),
-                bar(&1275u32.to_le_bytes()),
-                bar(&1551u32.to_le_bytes()),
-            ]),
-            Some([
-                bar(&2062u32.to_le_bytes()),
-                bar(&2051u32.to_le_bytes()),
-                bar(&2519u32.to_le_bytes()),
-            ]),
-            Some([
-                bar(&3042u32.to_le_bytes()),
-                bar(&3021u32.to_le_bytes()),
-                bar(&3731u32.to_le_bytes()),
-            ]),
-            Some([
-                bar(&4218u32.to_le_bytes()),
-                bar(&4185u32.to_le_bytes()),
-                bar(&5187u32.to_le_bytes()),
-            ]),
-        ];
-        for i in [1, 3, 6] {
+        let mut shards = SHARDS
+            .iter()
+            .map(|r| {
+                Some(
+                    r.iter()
+                        .map(|s| to_big_int_from_bytes(&s.to_le_bytes()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for i in LOST_SHARDS {
             shards[i] = None;
         }
 
