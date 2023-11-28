@@ -307,6 +307,7 @@ pub(crate) async fn start_provide(
 ) -> Response {
     info!("running command `start_provide`");
     let (sender, receiver) = oneshot::channel();
+
     let cmd = DragoonCommand::StartProvide { key, sender };
     let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
@@ -326,6 +327,7 @@ pub(crate) async fn get_providers(
 ) -> Response {
     info!("running command `get_providers`");
     let (sender, receiver) = oneshot::channel();
+
     let cmd = DragoonCommand::GetProviders { key, sender };
     let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
@@ -351,6 +353,7 @@ pub(crate) async fn get_providers(
 pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `bootstrap`");
     let (sender, receiver) = oneshot::channel();
+
     let cmd = DragoonCommand::Bootstrap { sender };
     let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
@@ -368,6 +371,7 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
     info!("running command `get`");
     let providers = {
         let (sender, receiver) = oneshot::channel();
+
         let cmd = DragoonCommand::GetProviders {
             key: key.clone(),
             sender,
@@ -385,6 +389,7 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
     };
 
     let (sender, receiver) = oneshot::channel();
+
     let cmd = DragoonCommand::Get {
         key: key.clone(),
         // FIXME: should use all the providers here instead of just the first one,
@@ -439,6 +444,7 @@ pub(crate) async fn put_record(
 ) -> Response {
     info!("running command `put_record`");
     let (sender, receiver) = oneshot::channel();
+
     let cmd = DragoonCommand::PutRecord {
         key,
         value: value.as_bytes().to_vec(),
@@ -462,6 +468,7 @@ pub(crate) async fn get_record(
 ) -> Response {
     info!("running command `get_record`");
     let (sender, receiver) = oneshot::channel();
+
     let cmd = DragoonCommand::GetRecord { key, sender };
     let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
