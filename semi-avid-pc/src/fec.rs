@@ -40,7 +40,9 @@ mod tests {
 
     const DATA: &[u8] = b"foobarbaz";
 
-    const SHARDS: [[u32; 3]; 7] = [
+    const K: usize = 3;
+
+    const SHARDS: [[u32; K]; 7] = [
         [102u32, 111u32, 111u32],
         [298u32, 305u32, 347u32],
         [690u32, 693u32, 827u32],
@@ -81,7 +83,7 @@ mod tests {
                     shard.append(&mut r.into_bigint().to_bytes_le());
                 }
                 blocks.push(Shard {
-                    k: 3,
+                    k: K as u32,
                     i: i as u32,
                     hash: hash.clone(),
                     bytes: shard,
