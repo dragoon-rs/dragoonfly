@@ -48,39 +48,39 @@ mod tests {
 
         let mut shards = [
             Some([
-                bar(&102u32.to_be_bytes()),
-                bar(&111u32.to_be_bytes()),
-                bar(&111u32.to_be_bytes()),
+                bar(&102u32.to_le_bytes()),
+                bar(&111u32.to_le_bytes()),
+                bar(&111u32.to_le_bytes()),
             ]),
             Some([
-                bar(&298u32.to_be_bytes()),
-                bar(&305u32.to_be_bytes()),
-                bar(&347u32.to_be_bytes()),
+                bar(&298u32.to_le_bytes()),
+                bar(&305u32.to_le_bytes()),
+                bar(&347u32.to_le_bytes()),
             ]),
             Some([
-                bar(&690u32.to_be_bytes()),
-                bar(&693u32.to_be_bytes()),
-                bar(&827u32.to_be_bytes()),
+                bar(&690u32.to_le_bytes()),
+                bar(&693u32.to_le_bytes()),
+                bar(&827u32.to_le_bytes()),
             ]),
             Some([
-                bar(&1278u32.to_be_bytes()),
-                bar(&1275u32.to_be_bytes()),
-                bar(&1551u32.to_be_bytes()),
+                bar(&1278u32.to_le_bytes()),
+                bar(&1275u32.to_le_bytes()),
+                bar(&1551u32.to_le_bytes()),
             ]),
             Some([
-                bar(&2062u32.to_be_bytes()),
-                bar(&2051u32.to_be_bytes()),
-                bar(&2519u32.to_be_bytes()),
+                bar(&2062u32.to_le_bytes()),
+                bar(&2051u32.to_le_bytes()),
+                bar(&2519u32.to_le_bytes()),
             ]),
             Some([
-                bar(&3042u32.to_be_bytes()),
-                bar(&3021u32.to_be_bytes()),
-                bar(&3731u32.to_be_bytes()),
+                bar(&3042u32.to_le_bytes()),
+                bar(&3021u32.to_le_bytes()),
+                bar(&3731u32.to_le_bytes()),
             ]),
             Some([
-                bar(&4218u32.to_be_bytes()),
-                bar(&4185u32.to_be_bytes()),
-                bar(&5187u32.to_be_bytes()),
+                bar(&4218u32.to_le_bytes()),
+                bar(&4185u32.to_le_bytes()),
+                bar(&5187u32.to_le_bytes()),
             ]),
         ];
         for i in [1, 3, 6] {
