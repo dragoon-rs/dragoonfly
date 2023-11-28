@@ -127,12 +127,12 @@ export def bootstrap [
     "bootstrap" | run-command $node
 }
 
-export def get [
+export def get-file [
     key: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
     log debug $"getting content of ($key) from ($node)"
-    $"get/($key)" | run-command $node
+    $"get-file/($key)" | run-command $node
 }
 
 export def add-file [

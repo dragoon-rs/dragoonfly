@@ -558,7 +558,7 @@ impl DragoonNetwork {
                 }
             }
             #[cfg(feature = "file-sharing")]
-            DragoonCommand::Get { key, peer, sender } => {
+            DragoonCommand::GetFile { key, peer, sender } => {
                 let request_id = self
                     .swarm
                     .behaviour_mut()

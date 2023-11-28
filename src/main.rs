@@ -41,7 +41,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
 
     #[cfg(feature = "file-sharing")]
     let router = router
-        .route("/get/:key", get(commands::get))
+        .route("/get-file/:key", get(commands::get_file))
         .route("/add-file/:key/:content", get(commands::add_file));
 
     let router = router.with_state(Arc::new(app::AppState::new(

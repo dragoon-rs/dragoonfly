@@ -78,7 +78,7 @@ pub(crate) enum DragoonCommand {
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
     #[cfg(feature = "file-sharing")]
-    Get {
+    GetFile {
         key: String,
         peer: PeerId,
         sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
@@ -114,7 +114,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             #[cfg(feature = "file-sharing")]
-            DragoonCommand::Get { .. } => write!(f, "get"),
+            DragoonCommand::GetFile { .. } => write!(f, "get-file"),
             #[cfg(feature = "file-sharing")]
             DragoonCommand::AddFile { .. } => write!(f, "add-file"),
             DragoonCommand::PutRecord { .. } => write!(f, "put-record"),
@@ -378,8 +378,8 @@ pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
 }
 
 #[cfg(feature = "file-sharing")]
-pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
-    info!("running command `get`");
+pub(crate) async fn get_file(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `get_file`");
     let providers = {
         let (sender, receiver) = oneshot::channel();
 
@@ -401,7 +401,7 @@ pub(crate) async fn get(Path(key): Path<String>, State(state): State<Arc<AppStat
 
     let (sender, receiver) = oneshot::channel();
 
-    let cmd = DragoonCommand::Get {
+    let cmd = DragoonCommand::GetFile {
         key: key.clone(),
         // FIXME: should use all the providers here instead of just the first one,
         // run the requests on all of them and then "future select" the first one to complete
