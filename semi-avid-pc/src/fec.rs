@@ -4,7 +4,7 @@ use crate::Shard;
 
 pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     let k = blocks[0].k;
-    let n = blocks.iter().map(|block| block.i).max().unwrap_or(0) + 1;
+    let n = blocks.iter().map(|b| b.i).max().unwrap_or(0) + 1;
 
     if blocks.len() < k as usize {
         return Err(Error::TooFewShards);
