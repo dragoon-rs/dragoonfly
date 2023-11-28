@@ -35,6 +35,7 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/start-provide/:key", get(commands::start_provide))
         .route("/get-providers/:key", get(commands::get_providers))
         .route("/bootstrap", get(commands::bootstrap))
+        .route("/dragoon/peers", get(commands::dragoon_peers))
         .with_state(Arc::new(app::AppState::new(cmd_sender)));
 
     let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {

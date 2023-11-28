@@ -183,12 +183,15 @@ impl DragoonNetwork {
             // Prints out the info received via the identify event
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
                 info!("Received {info:?}");
-                self.swarm.behaviour_mut().kademlia.add_address(
-                    &peer_id,
-                    info.listen_addrs.get(0).unwrap().clone()
-                );
-                info!("peer added");
-
+                if let Some(addr) = info.listen_addrs.get(0) {
+                    self.swarm.behaviour_mut().kademlia.add_address(
+                        &peer_id,
+                        addr.clone()
+                    );
+                    info!("peer added");
+                } else {
+                    error!("peer not added, no listen address");
+                }
             }
             // SwarmEvent::ConnectionEstablished { peer_id, endpoint, num_established, concurrent_dial_errors, established_in } => {
             //     match endpoint {
@@ -397,6 +400,15 @@ impl DragoonNetwork {
                             error!("Cannot send result");
                         }
                     }
+                }
+            }
+            DragoonCommand::DragoonPeers { sender } => {
+                let peers = self.swarm.behaviour_mut().dragoon.get_connected_peer();
+                for p in peers {
+                    self.swarm.behaviour_mut().dragoon.send_data_to_peer(p);
+                }
+                if sender.send(Ok(self.swarm.behaviour_mut().dragoon.get_connected_peer())).is_err() {
+                    error!("could not send result");
                 }
             }
         }
