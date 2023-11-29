@@ -3,7 +3,6 @@ use futures::{future, ready, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}
 use futures_timer::Delay;
 use libp2p::core::upgrade::ReadyUpgrade;
 use libp2p::core::Endpoint;
-use libp2p::identity::PublicKey;
 use libp2p::swarm::behaviour::ConnectionEstablished;
 use libp2p::swarm::handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound};
 use libp2p::swarm::{
@@ -19,23 +18,19 @@ use std::time::{Duration, Instant};
 use std::{fmt, io};
 
 #[derive(Debug)]
-pub enum InEvent {
+pub(crate) enum InEvent {
     Send(Vec<u8>),
 }
 
 #[derive(Debug)]
-pub enum Event {
+pub(crate) enum Event {
     Sent { peer: PeerId },
 }
 
 #[derive(Debug)]
-pub enum Failure {
-    /// The ping timed out, i.e. no response was received within the
-    /// configured ping timeout.
+pub(crate) enum Failure {
     Timeout,
-    /// The peer does not support the ping protocol.
     Unsupported,
-    /// The ping failed for reasons other than a timeout.
     Other {
         error: Box<dyn std::error::Error + Send + 'static>,
     },
@@ -50,9 +45,9 @@ impl Failure {
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Failure::Timeout => f.write_str("Ping timeout"),
-            Failure::Other { error } => write!(f, "Ping error: {error}"),
-            Failure::Unsupported => write!(f, "Ping protocol not supported"),
+            Failure::Timeout => f.write_str("Protocol timeout"),
+            Failure::Other { error } => write!(f, "Protocol error: {error}"),
+            Failure::Unsupported => write!(f, "Protocol not supported"),
         }
     }
 }
@@ -70,7 +65,7 @@ impl Error for Failure {
 type DragoonSendFuture = BoxFuture<'static, Result<(Stream, Duration), Failure>>;
 type DragoonRecvFuture = BoxFuture<'static, Result<Stream, io::Error>>;
 
-pub struct Handler {
+pub(crate) struct Handler {
     remote_peer_id: PeerId,
     events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), Event>>,
     network_send_task: Vec<DragoonSendFuture>,
@@ -79,7 +74,7 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub fn new(remote_peer_id: PeerId) -> Self {
+    pub(crate) fn new(remote_peer_id: PeerId) -> Self {
         Self {
             remote_peer_id,
             events: VecDeque::new(),
@@ -225,7 +220,7 @@ impl ConnectionHandler for Handler {
     }
 }
 
-pub struct Behaviour {
+pub(crate) struct Behaviour {
     protocol_version: String,
     connected_peers: HashSet<PeerId>,
     listen_addresses: ListenAddresses,
@@ -235,7 +230,7 @@ pub struct Behaviour {
 }
 
 impl Behaviour {
-    pub fn new(protocol_version: String, local_public_key: PublicKey) -> Self {
+    pub(crate) fn new(protocol_version: String) -> Self {
         Self {
             protocol_version,
             connected_peers: HashSet::new(),
@@ -250,7 +245,6 @@ impl Behaviour {
         &mut self,
         ConnectionEstablished {
             peer_id,
-            failed_addresses,
             other_established,
             ..
         }: ConnectionEstablished,
@@ -280,7 +274,9 @@ impl Behaviour {
     }
 
     fn on_dial_failure(&mut self, DialFailure { peer_id, error, .. }: DialFailure) {
-        let Some(peer_id) = peer_id else { return };
+        if peer_id.is_none() {
+            return;
+        }
 
         match error {
             DialError::LocalPeerId { .. }
@@ -290,7 +286,7 @@ impl Behaviour {
             | DialError::Transport(_)
             | DialError::NoAddresses => {
                 if let DialError::Transport(addresses) = error {
-                    for (addr, _) in addresses {
+                    for (_, _) in addresses {
                         //self.address_failed(peer_id, addr)
                     }
                 }
@@ -309,11 +305,11 @@ impl Behaviour {
         }
     }
 
-    pub fn get_connected_peer(&self) -> HashSet<PeerId> {
+    pub(crate) fn get_connected_peer(&self) -> HashSet<PeerId> {
         self.connected_peers.clone()
     }
 
-    pub fn send_data_to_peer(&mut self, data: String, peer: PeerId) -> bool {
+    pub(crate) fn send_data_to_peer(&mut self, data: String, peer: PeerId) -> bool {
         if self.connected_peers.contains(&peer) {
             self.events.push_back(ToSwarm::NotifyHandler {
                 peer_id: peer,
@@ -335,8 +331,8 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         _connection_id: ConnectionId,
         peer: PeerId,
-        local_addr: &Multiaddr,
-        remote_addr: &Multiaddr,
+        _local_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(Handler::new(peer))
     }
@@ -345,8 +341,8 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         _connection_id: ConnectionId,
         peer: PeerId,
-        addr: &Multiaddr,
-        role_override: Endpoint,
+        _addr: &Multiaddr,
+        _role_override: Endpoint,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(Handler::new(peer))
     }
@@ -370,7 +366,7 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_connection_handler_event(
         &mut self,
-        peer: PeerId,
+        _peer: PeerId,
         _connection_id: ConnectionId,
         _event: THandlerOutEvent<Self>,
     ) {
@@ -441,7 +437,7 @@ where
     stream.read(&mut payload).await?;
     let str = String::from_utf8(payload.to_vec()).unwrap();
     println!("received payload: {:?}", str);
-    let mut response = [42, 42, 42, 42];
+    let response = [42, 42, 42, 42];
     stream.write_all(&response).await?;
     stream.flush().await?;
     Ok(stream)

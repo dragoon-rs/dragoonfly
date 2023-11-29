@@ -60,7 +60,7 @@ pub(crate) async fn create_swarm(
                 )],
                 request_response::Config::default(),
             ),
-            dragoon: Behaviour::new("/dragoon/1.0.0".to_string(), key.public()),
+            dragoon: Behaviour::new("/dragoon/1.0.0".to_string()),
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60 * 60)))
         .build();
@@ -615,7 +615,6 @@ impl DragoonNetwork {
                 self.pending_get_record.insert(id, sender);
             }
             DragoonCommand::DragoonPeers { sender } => {
-                let peers = self.swarm.behaviour_mut().dragoon.get_connected_peer();
                 if sender
                     .send(Ok(self.swarm.behaviour_mut().dragoon.get_connected_peer()))
                     .is_err()
