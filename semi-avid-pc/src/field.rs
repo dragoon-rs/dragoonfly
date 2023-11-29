@@ -208,5 +208,9 @@ mod tests {
                 vec![5, 11],
             ]),
         );
+
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(12, 5, None);
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(12, 7, None);
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(12, 34, None);
     }
 }
