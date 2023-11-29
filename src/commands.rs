@@ -72,6 +72,11 @@ pub(crate) enum DragoonCommand {
     DragoonPeers {
         sender: oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>,
     },
+    DragoonSend {
+        data: String,
+        peerid: String,
+        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+    }
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -89,6 +94,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
+            DragoonCommand::DragoonSend {.. } => write!(f, "dragoon-send"),
         }
     }
 }
@@ -311,6 +317,24 @@ pub(crate) async fn dragoon_peers(
                         .collect::<Vec<String>>(),
                 ),
             ).into_response()
+        }
+        Err(e) => handle_canceled(e, &cmd_name),
+    }
+}
+
+pub(crate) async fn dragoon_send(
+    Path((peerid, data)) : Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (sender, receiver) = oneshot::channel();
+    let cmd = DragoonCommand::DragoonSend { data, peerid, sender };
+    let cmd_name = cmd.to_string();
+    send_command(cmd, state).await;
+
+    match receiver.await {
+        Ok(res) => match res {
+            Ok(_) => (StatusCode::OK, Json("")).into_response(),
+            Err(e) => handle_dragoon_error(e, &cmd_name),
         }
         Err(e) => handle_canceled(e, &cmd_name),
     }

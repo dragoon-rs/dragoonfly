@@ -2,7 +2,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 
 use libp2p::core::transport::ListenerId;
-use libp2p::identity::Keypair;
+use libp2p::identity::{Keypair, ParseError};
 use libp2p::{
     core::Multiaddr,
     kad,
@@ -16,12 +16,13 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{error, info};
 
 use crate::commands::DragoonCommand;
 use crate::dragoon::Behaviour;
-use crate::error::DragoonError::{BadListener, BootstrapError, DialError, ProviderError};
+use crate::error::DragoonError::{BadListener, BootstrapError, DialError, PeerNotFound, ProviderError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
@@ -404,11 +405,29 @@ impl DragoonNetwork {
             }
             DragoonCommand::DragoonPeers { sender } => {
                 let peers = self.swarm.behaviour_mut().dragoon.get_connected_peer();
-                for p in peers {
-                    self.swarm.behaviour_mut().dragoon.send_data_to_peer(p);
-                }
                 if sender.send(Ok(self.swarm.behaviour_mut().dragoon.get_connected_peer())).is_err() {
                     error!("could not send result");
+                }
+            }
+            DragoonCommand::DragoonSend { data, peerid, sender } => {
+                match PeerId::from_str(peerid.as_str()) {
+                    Ok(peer) => {
+                        if self.swarm.behaviour_mut().dragoon.send_data_to_peer(data,peer) {
+                            if sender.send(Ok(())).is_err() {
+                                error!("could not send result");
+                            }
+                        } else {
+                            let err = PeerNotFound;
+                            if sender.send(Err(Box::new(err))).is_err() {
+                                error!("Cannot send result");
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if sender.send(Err(Box::new(err))).is_err() {
+                            error!("Cannot send result");
+                        }
+                    }
                 }
             }
         }

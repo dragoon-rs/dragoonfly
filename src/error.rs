@@ -15,6 +15,8 @@ pub enum DragoonError {
     ProviderError(String),
     #[error("Bootstrap error")]
     BootstrapError(String),
+    #[error("Peer not connected")]
+    PeerNotFound,
 }
 
 impl IntoResponse for DragoonError {
@@ -33,6 +35,7 @@ impl IntoResponse for DragoonError {
             DragoonError::BootstrapError(ref msg) => {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
+            DragoonError::PeerNotFound => (StatusCode::BAD_REQUEST,self.to_string())
         };
         (status, Json(format!("{}", err_msg))).into_response()
     }

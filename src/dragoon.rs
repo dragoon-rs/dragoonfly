@@ -74,6 +74,7 @@ pub struct Handler {
     events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), Event>>,
     network_send_task: Vec<DragoonSendFuture>,
     network_recv_task: Vec<DragoonRecvFuture>,
+    data_to_send: VecDeque<Vec<u8>>,
 
 }
 
@@ -83,7 +84,8 @@ impl Handler {
             remote_peer_id,
             events: VecDeque::new(),
             network_send_task: Vec::new(),
-            network_recv_task: Vec::new()
+            network_recv_task: Vec::new(),
+            data_to_send: VecDeque::new()
         }
     }
 
@@ -101,8 +103,6 @@ impl Handler {
                 dragoon_receive_data(output)
             )
         );
-       // TODO:  dragoon_send(output, &[1, 2, 3, 4], Duration::new(10,0)).await
-       //     .expect("TODO: panic message");
     }
 
     fn on_fully_negotiated_outbound(
@@ -114,11 +114,13 @@ impl Handler {
             <Self as ConnectionHandler>::OutboundOpenInfo,
         >,
     ) {
-        self.network_send_task.push(
-            Box::pin(
-                dragoon_send(output, &[1, 2, 3, 4], Duration::new(10,0))
-            )
-        );
+        if let Some(data) = self.data_to_send.pop_front() {
+            self.network_send_task.push(
+                Box::pin(
+                    dragoon_send(output, data, Duration::new(10, 0))
+                )
+            );
+        }
     }
 }
 
@@ -185,6 +187,7 @@ impl ConnectionHandler for Handler {
         match event {
             InEvent::Send(data) => {
                 println!("send data for {}", self.remote_peer_id);
+                self.data_to_send.push_back(data);
                 self.events.push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
                     protocol: SubstreamProtocol::new(
                         ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")),
@@ -212,13 +215,13 @@ impl ConnectionHandler for Handler {
                 self.on_fully_negotiated_outbound(protocol)
             }
             ConnectionEvent::LocalProtocolsChange(_) => {
-                self.events
-                    .push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
-                        protocol: SubstreamProtocol::new(
-                            ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")),
-                            (),
-                        ),
-                    });
+                // self.events
+                //     .push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
+                //         protocol: SubstreamProtocol::new(
+                //             ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")),
+                //             (),
+                //         ),
+                //     });
             }
             ConnectionEvent::DialUpgradeError(_) => {}
             ConnectionEvent::ListenUpgradeError(_) => {}
@@ -317,13 +320,16 @@ impl Behaviour {
         self.connected_peers.clone()
     }
 
-    pub fn send_data_to_peer(&mut self, peer: PeerId) {
+    pub fn send_data_to_peer(&mut self, data: String, peer: PeerId) -> bool {
         if self.connected_peers.contains(&peer) {
             self.events.push_back(ToSwarm::NotifyHandler {
                 peer_id: peer,
                 handler: NotifyHandler::Any,
-                event: InEvent::Send(vec![1,2,3,4]),
+                event: InEvent::Send(data.into_bytes()),
             });
+            return true;
+        } else {
+            return false;
         }
     }
 }
@@ -371,7 +377,7 @@ impl NetworkBehaviour for Behaviour {
     }
 }
 
-async fn dragoon_send(stream: Stream, data: &[u8], timeout: Duration) -> Result<(Stream, Duration), Failure> {
+async fn dragoon_send(stream: Stream, data: Vec<u8>, timeout: Duration) -> Result<(Stream, Duration), Failure> {
     println!("dragoon_send");
 
     let req = dragoon_send_data(stream, data);
@@ -384,11 +390,11 @@ async fn dragoon_send(stream: Stream, data: &[u8], timeout: Duration) -> Result<
     }
 }
 
-pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: &[u8]) -> io::Result<(S, Duration)>
+pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: Vec<u8>) -> io::Result<(S, Duration)>
     where
         S: AsyncRead + AsyncWrite + Unpin,
 {
-    stream.write_all(data).await?;
+    stream.write_all(data.as_slice()).await?;
     stream.flush().await?;
     let mut recv_payload = [0u8; 4];
     stream.read_exact(&mut recv_payload).await?;
@@ -417,9 +423,10 @@ pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<S>
     where
         S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut payload = [0u8; 4];
-    stream.read_exact(&mut payload).await?;
-    println!("received payload: {payload:?}");
+    let mut payload = [0u8; 64];
+    stream.read(&mut payload).await?;
+    let str = String::from_utf8(payload.to_vec()).unwrap();
+    println!("received payload: {:?}", str);
     let mut response = [42,42,42,42];
     stream.write_all(&response).await?;
     stream.flush().await?;
