@@ -144,30 +144,36 @@ mod tests {
         split_data_template::<Bls12_381>(&bytes()[..nb_bytes], 8, Some(16));
     }
 
-    fn build_interleaved_polynomials_template<E, P>()
-    where
+    fn build_interleaved_polynomials_template<E, P>(
+        nb_elements: usize,
+        m: usize,
+        expected: Vec<Vec<usize>>,
+    ) where
         E: Pairing,
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
         let rng = &mut test_rng();
 
-        let elements = (0..12)
+        let elements = (0..nb_elements)
             .map(|_| E::ScalarField::rand(rng))
             .collect::<Vec<_>>();
 
-        let actual = field::build_interleaved_polynomials::<E, P>(&elements, 3);
-        let expected = vec![
-            P::from_coefficients_vec(vec![elements[0], elements[3], elements[6], elements[9]]),
-            P::from_coefficients_vec(vec![elements[1], elements[4], elements[7], elements[10]]),
-            P::from_coefficients_vec(vec![elements[2], elements[5], elements[8], elements[11]]),
-        ];
+        let actual = field::build_interleaved_polynomials::<E, P>(&elements, m);
+        let expected = expected
+            .iter()
+            .map(|r| P::from_coefficients_vec(r.iter().map(|&i| elements[i]).collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn build_interleaved_polynomials() {
-        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>()
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
+            12,
+            3,
+            vec![vec![0, 3, 6, 9], vec![1, 4, 7, 10], vec![2, 5, 8, 11]],
+        );
     }
 }
