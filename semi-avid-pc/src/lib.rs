@@ -113,7 +113,8 @@ where
     debug!("splitting bytes into polynomials");
     let elements = field::split_data_into_field_elements::<E>(bytes, k);
     let nb_polynomials = elements.len() / k;
-    let polynomials = field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials);
+    let polynomials =
+        field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials).unwrap();
     info!(
         "data is composed of {} polynomials and {} elements",
         polynomials.len(),
@@ -231,7 +232,8 @@ mod tests {
 
         let elements = field::split_data_into_field_elements::<E>(bytes, k);
         let nb_polynomials = elements.len() / k;
-        let polynomials = field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials);
+        let polynomials =
+            field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials).unwrap();
 
         let polynomials_to_commit = (0..polynomials[0].coeffs().len())
             .map(|i| P::from_coefficients_vec(polynomials.iter().map(|p| p.coeffs()[i]).collect()))

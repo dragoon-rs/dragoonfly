@@ -60,18 +60,15 @@ pub(crate) fn split_data_into_field_elements<E: Pairing>(
 pub(crate) fn build_interleaved_polynomials<E, P>(
     elements: &[E::ScalarField],
     nb_polynomials: usize,
-) -> Vec<P>
+) -> Option<Vec<P>>
 where
     E: Pairing,
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
     for<'a, 'b> &'a P: Div<&'b P, Output = P>,
 {
-    assert!(
-        elements.len() % nb_polynomials == 0,
-        "padding_not_supported: vector of elements ({}) should be divisible by the desired number of polynomials ({})",
-        elements.len(),
-        nb_polynomials
-    );
+    if elements.len() % nb_polynomials != 0 {
+        return None;
+    }
 
     let mut polynomials = Vec::new();
     for i in 0..nb_polynomials {
@@ -84,7 +81,7 @@ where
         polynomials.push(P::from_coefficients_vec(coefficients));
     }
 
-    polynomials
+    Some(polynomials)
 }
 
 #[cfg(test)]
@@ -147,7 +144,7 @@ mod tests {
     fn build_interleaved_polynomials_template<E, P>(
         nb_elements: usize,
         m: usize,
-        expected: Vec<Vec<usize>>,
+        expected: Option<Vec<Vec<usize>>>,
     ) where
         E: Pairing,
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
@@ -160,10 +157,19 @@ mod tests {
             .collect::<Vec<_>>();
 
         let actual = field::build_interleaved_polynomials::<E, P>(&elements, m);
-        let expected = expected
-            .iter()
-            .map(|r| P::from_coefficients_vec(r.iter().map(|&i| elements[i]).collect::<Vec<_>>()))
-            .collect::<Vec<_>>();
+
+        let expected = if let Some(expected) = expected {
+            Some(
+                expected
+                    .iter()
+                    .map(|r| {
+                        P::from_coefficients_vec(r.iter().map(|&i| elements[i]).collect::<Vec<_>>())
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
 
         assert_eq!(actual, expected);
     }
@@ -173,29 +179,34 @@ mod tests {
         build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
             12,
             2,
-            vec![vec![0, 2, 4, 6, 8, 10], vec![1, 3, 5, 7, 9, 11]],
+            Some(vec![vec![0, 2, 4, 6, 8, 10], vec![1, 3, 5, 7, 9, 11]]),
         );
         build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
             12,
             3,
-            vec![vec![0, 3, 6, 9], vec![1, 4, 7, 10], vec![2, 5, 8, 11]],
+            Some(vec![vec![0, 3, 6, 9], vec![1, 4, 7, 10], vec![2, 5, 8, 11]]),
         );
         build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
             12,
             4,
-            vec![vec![0, 4, 8], vec![1, 5, 9], vec![2, 6, 10], vec![3, 7, 11]],
+            Some(vec![
+                vec![0, 4, 8],
+                vec![1, 5, 9],
+                vec![2, 6, 10],
+                vec![3, 7, 11],
+            ]),
         );
         build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
             12,
             6,
-            vec![
+            Some(vec![
                 vec![0, 6],
                 vec![1, 7],
                 vec![2, 8],
                 vec![3, 9],
                 vec![4, 10],
                 vec![5, 11],
-            ],
+            ]),
         );
     }
 }
