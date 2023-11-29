@@ -113,8 +113,17 @@ where
     debug!("splitting bytes into polynomials");
     let elements = field::split_data_into_field_elements::<E>(bytes, k);
     let nb_polynomials = elements.len() / k;
-    let polynomials =
-        field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials).unwrap();
+    let polynomials = match field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials)
+    {
+        Some(polynomials) => polynomials,
+        None => return Err(ark_poly_commit::Error::IncorrectInputLength(
+            format!(
+                "padding_not_supported: vector of elements ({}) should be divisible by the desired number of polynomials ({})",
+                elements.len(),
+                nb_polynomials
+            )
+        )),
+    };
     info!(
         "data is composed of {} polynomials and {} elements",
         polynomials.len(),
@@ -145,7 +154,10 @@ where
     prove::<E, P>(commits, hash, bytes.len(), polynomials, &points)
 }
 
-pub fn verify<E, P>(block: &Block<E>, verifier_key: &Powers<E>) -> bool
+pub fn verify<E, P>(
+    block: &Block<E>,
+    verifier_key: &Powers<E>,
+) -> Result<bool, ark_poly_commit::Error>
 where
     E: Pairing,
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
@@ -162,9 +174,9 @@ where
         elements.push(E::ScalarField::from_le_bytes_mod_order(chunk));
     }
     let polynomial = P::from_coefficients_vec(elements);
-    let (commit, _) = KZG10::<E, P>::commit(verifier_key, &polynomial, None, None).unwrap();
+    let (commit, _) = KZG10::<E, P>::commit(verifier_key, &polynomial, None, None)?;
 
-    Into::<E::G1>::into(commit.0)
+    Ok(Into::<E::G1>::into(commit.0)
         == block
             .commit
             .iter()
@@ -173,22 +185,25 @@ where
                 let commit: E::G1 = c.0.into();
                 commit.mul(alpha.pow([j as u64]))
             })
-            .sum()
+            .sum())
 }
 
-pub fn batch_verify<E, P>(blocks: &[Block<E>], verifier_key: &Powers<E>) -> bool
+pub fn batch_verify<E, P>(
+    blocks: &[Block<E>],
+    verifier_key: &Powers<E>,
+) -> Result<bool, ark_poly_commit::Error>
 where
     E: Pairing,
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
     for<'a, 'b> &'a P: Div<&'b P, Output = P>,
 {
     for block in blocks {
-        if !verify(block, verifier_key) {
-            return false;
+        if !verify(block, verifier_key)? {
+            return Ok(false);
         }
     }
 
-    true
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -263,10 +278,10 @@ mod tests {
             test_setup::<E, P>(bytes, k, n).expect("proof failed for bls12-381");
 
         for block in &blocks {
-            assert!(verify::<E, P>(block, &verifier_key));
+            assert!(verify::<E, P>(block, &verifier_key)?);
         }
 
-        assert!(batch_verify(&blocks[1..3], &verifier_key));
+        assert!(batch_verify(&blocks[1..3], &verifier_key)?);
 
         Ok(())
     }
@@ -336,7 +351,7 @@ mod tests {
             test_setup::<E, P>(bytes, k, n).expect("proof failed for bls12-381");
 
         for block in &blocks {
-            assert!(verify::<E, P>(block, &verifier_key));
+            assert!(verify::<E, P>(block, &verifier_key)?);
         }
 
         let mut corrupted_block = blocks[0].clone();
@@ -346,7 +361,7 @@ mod tests {
         commits[0] = commits[0].mul(a.pow([4321_u64]));
         corrupted_block.commit = commits.iter().map(|&c| Commitment(c.into())).collect();
 
-        assert!(!verify::<E, P>(&corrupted_block, &verifier_key));
+        assert!(!verify::<E, P>(&corrupted_block, &verifier_key)?);
 
         // let's build some blocks containing errors
         let mut blocks_with_errors = Vec::new();
@@ -357,10 +372,10 @@ mod tests {
             commit: b3.commit.clone(),
             m: b3.m,
         });
-        assert!(batch_verify(blocks_with_errors.as_slice(), &verifier_key));
+        assert!(batch_verify(blocks_with_errors.as_slice(), &verifier_key)?);
 
         blocks_with_errors.push(corrupted_block);
-        assert!(!batch_verify(blocks_with_errors.as_slice(), &verifier_key));
+        assert!(!batch_verify(blocks_with_errors.as_slice(), &verifier_key)?);
 
         Ok(())
     }

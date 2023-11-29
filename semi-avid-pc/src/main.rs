@@ -72,10 +72,12 @@ fn parse_args() -> (Vec<u8>, usize, usize, bool, String, bool, bool, Vec<String>
 
 fn generate_powers(bytes: &[u8], powers_file: &str) -> Result<(), std::io::Error> {
     info!("generating new powers");
+    // FIXME: do not unwrap and return an error with std::io::Error
     let powers = setup::random::<Bls12_381, UniPoly12_381>(bytes.len()).unwrap();
 
     info!("serializing powers");
     let mut serialized = vec![0; powers.serialized_size(COMPRESS)];
+    // FIXME: do not unwrap and return an error with std::io::Error
     powers
         .serialize_with_mode(&mut serialized[..], COMPRESS)
         .unwrap();
@@ -97,6 +99,7 @@ fn read_block<E: Pairing>(block_files: &[String]) -> Vec<(String, Block<E>)> {
         .map(|(f, s)| {
             (
                 f.clone(),
+                // FIXME: do not unwrap and return an error
                 Block::<E>::deserialize_with_mode(&s[..], COMPRESS, VALIDATE).unwrap(),
             )
         })
@@ -114,7 +117,8 @@ where
 {
     let res: Vec<_> = blocks
         .iter()
-        .map(|(f, b)| (f, verify::<E, P>(&b, &powers)))
+        // FIXME: do not unwrap and return an error with std::io::Error
+        .map(|(f, b)| (f, verify::<E, P>(&b, &powers).unwrap()))
         .collect();
 
     eprint!("[");
@@ -135,6 +139,7 @@ fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) -> Result<(), std::io::Error> {
 
         debug!("serializing block {}", i);
         let mut serialized = vec![0; block.serialized_size(COMPRESS)];
+        // FIXME: do not unwrap and return an error with std::io::Error
         block
             .serialize_with_mode(&mut serialized[..], COMPRESS)
             .unwrap();
