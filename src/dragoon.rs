@@ -25,6 +25,7 @@ pub(crate) enum InEvent {
 #[derive(Debug)]
 pub(crate) enum Event {
     Sent { peer: PeerId },
+    Received { shard: Shard}
 }
 
 #[derive(Debug)]
@@ -63,7 +64,7 @@ impl Error for Failure {
 }
 
 type DragoonSendFuture = BoxFuture<'static, Result<(Stream, Duration), Failure>>;
-type DragoonRecvFuture = BoxFuture<'static, Result<Stream, io::Error>>;
+type DragoonRecvFuture = BoxFuture<'static, Result<Shard, io::Error>>;
 
 pub(crate) struct Handler {
     remote_peer_id: PeerId,
@@ -136,11 +137,14 @@ impl ConnectionHandler for Handler {
             return Poll::Ready(event);
         }
         let mut to_remove = Vec::new();
+        let mut shard_sent = None;
         for (id, fut) in &mut self.network_send_task.iter_mut().enumerate() {
             match ready!(fut.as_mut().poll(cx)) {
                 Ok(o) => {
                     println!("send task finished {o:?}");
                     to_remove.push(id);
+                    shard_sent = Some(self.remote_peer_id);
+                    break;
                 }
                 Err(e) => {
                     println!("send task error : {e}")
@@ -150,13 +154,19 @@ impl ConnectionHandler for Handler {
         for &id in to_remove.iter().rev() {
             self.network_send_task.remove(id);
         }
+        if let Some(peer) = shard_sent {
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Sent { peer }));
+        }
 
         to_remove.clear();
+        let mut shard_received = None;
         for (id, fut) in &mut self.network_recv_task.iter_mut().enumerate() {
             match ready!(fut.as_mut().poll(cx)) {
                 Ok(o) => {
                     println!("recvtask finished {o:?}");
                     to_remove.push(id);
+                    shard_received = Some(o);
+                    break;
                 }
                 Err(e) => {
                     println!("recvtask error {e}");
@@ -167,6 +177,9 @@ impl ConnectionHandler for Handler {
             self.network_recv_task.remove(id);
         }
 
+        if let Some(s) = shard_received {
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Received { shard:s }));
+        }
         return Poll::Pending;
     }
 
@@ -219,6 +232,7 @@ impl ConnectionHandler for Handler {
         }
     }
 }
+
 
 pub(crate) struct Behaviour {
     protocol_version: String,
@@ -366,16 +380,30 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_connection_handler_event(
         &mut self,
-        _peer: PeerId,
-        _connection_id: ConnectionId,
-        _event: THandlerOutEvent<Self>,
+        peer: PeerId,
+        connection_id: ConnectionId,
+        event: THandlerOutEvent<Self>,
     ) {
-        println!("Behaviour::on_connection_handler_event, push Event");
+        println!("Behaviour::on_connection_handler_event, push Event {event:?}");
+        match event {
+            Event::Sent { peer } => {
+                self.events.push_front(ToSwarm::GenerateEvent {
+                    0: Event::Sent { peer},
+                });
+            }
+            Event::Received { shard } => {
+                self.events.push_front(ToSwarm::GenerateEvent {
+                    0: Event::Received {  shard },
+                });
+            }
+        }
+
     }
 
     #[tracing::instrument(level = "trace", name = "NetworkBehaviour::poll", skip(self))]
     fn poll(&mut self, _: &mut Context<'_>) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.events.pop_front() {
+            println!("NetworkBehaviour::poll event : {event:?}");
             return Poll::Ready(event);
         }
 
@@ -388,7 +416,7 @@ async fn dragoon_send(
     data: Vec<u8>,
     timeout: Duration,
 ) -> Result<(Stream, Duration), Failure> {
-    println!("dragoon_send");
+    println!("dragoon_send {stream:?}");
 
     let req = dragoon_send_data(stream, data);
     futures::pin_mut!(req);
@@ -429,10 +457,18 @@ where
 //     Ok(stream)
 // }
 
-pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<S>
+#[derive(Debug)]
+pub struct Shard {
+    hash: Vec<u8>,
+    shard: Vec<u8>,
+    commit: Vec<u8>,
+}
+
+pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<Shard>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    println!("start receive data");
     let mut payload = [0u8; 64];
     stream.read(&mut payload).await?;
     let str = String::from_utf8(payload.to_vec()).unwrap();
@@ -440,5 +476,10 @@ where
     let response = [42, 42, 42, 42];
     stream.write_all(&response).await?;
     stream.flush().await?;
-    Ok(stream)
+    let shard = Shard {
+        hash: vec![1,2,3,4],
+        shard: vec![5,6,7,8,9],
+        commit: vec![0,1,]
+    };
+    Ok(shard)
 }
