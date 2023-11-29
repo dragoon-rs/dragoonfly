@@ -114,7 +114,11 @@ where
     let elements = field::split_data_into_field_elements::<E>(bytes, k);
     let nb_polynomials = elements.len() / k;
     let polynomials = field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials);
-    info!("data is composed of {} polynomials", polynomials.len());
+    info!(
+        "data is composed of {} polynomials and {} elements",
+        polynomials.len(),
+        elements.len()
+    );
 
     debug!("transposing the polynomials to commit");
     let polynomials_to_commit = (0..polynomials[0].coeffs().len())
