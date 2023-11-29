@@ -23,7 +23,7 @@ pub(crate) enum InEvent {
 }
 
 #[derive(Debug)]
-pub(crate) enum Event {
+pub enum Event {
     Sent { peer: PeerId },
     Received { shard: Shard}
 }

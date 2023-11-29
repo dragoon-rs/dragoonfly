@@ -28,6 +28,8 @@ use crate::error::DragoonError::{
     BadListener, BootstrapError, DialError, PeerNotFound, ProviderError,
 };
 
+use crate::dragoon::Event;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,6 +347,17 @@ impl DragoonNetwork {
             #[cfg(feature = "file-sharing")]
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
                 self.handle_request_response(request_response).await;
+            }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Dragoon(event)) => {
+                match event {
+                    Event::Sent { peer } => {
+                        info!("Sent a shard to peer {peer}");
+                    }
+                    Event::Received { shard } => {
+                        info!("Received a shard : {shard:?}");
+                    }
+                }
+
             }
             e => warn!("[unknown event] {:?}", e),
         }
