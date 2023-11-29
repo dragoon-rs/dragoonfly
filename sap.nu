@@ -1,3 +1,5 @@
+const SEMI_AVID_PC_BINARY = "./target/release/semi-avid-pc"
+
 def "nu-complete log-levels" []: nothing -> list<string> {
     [
         "TRACE"
@@ -14,7 +16,7 @@ def run-sap [
 ]: nothing -> any {
     with-env {RUST_LOG: $log_level} {
         let res = do {
-            ^./target/release/semi-avid-pc ([
+            ^$SEMI_AVID_PC_BINARY ([
                 $args.bytes
                 $args.k
                 $args.n
