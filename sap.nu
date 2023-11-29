@@ -30,6 +30,10 @@ def run-sap [
     }
 }
 
+export def "sap build" [] {
+    ^cargo build --package semi-avid-pc --release
+}
+
 export def "sap setup" [
     bytes: string,
     --powers-file: path = "powers.bin",
