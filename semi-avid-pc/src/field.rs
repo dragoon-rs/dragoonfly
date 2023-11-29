@@ -96,8 +96,7 @@ mod tests {
     use ark_ff::PrimeField;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::DenseUVPolynomial;
-    use ark_std::test_rng;
-    use ark_std::UniformRand;
+    use ark_std::{test_rng, UniformRand, Zero};
 
     use crate::field;
 
@@ -124,6 +123,8 @@ mod tests {
                 elements.len()
             );
         }
+
+        assert!(!elements.iter().any(|&e| e == E::ScalarField::zero()));
     }
 
     #[test]
