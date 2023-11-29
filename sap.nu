@@ -53,15 +53,14 @@ export def "sap setup" [
 
 export def "sap prove" [
     bytes: string,
-    k: int,
-    n: int,
+    --fec-params: record<k: int, n: int>,
     --powers-file: path = "powers.bin",
     --log-level: string@"nu-complete log-levels" = "INFO"
 ]: nothing -> list<string> {
     run-sap --log-level $log_level {
         bytes: $bytes,
-        k: $k,
-        n: $n,
+        k: $fec_params.k,
+        n: $fec_params.n,
         do_generate_powers: false,
         powers_file: $powers_file,
         do_reconstruct_data: false,
