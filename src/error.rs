@@ -38,7 +38,7 @@ impl IntoResponse for DragoonError {
             DragoonError::BootstrapError(ref msg) => {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
-            DragoonError::PeerNotFound => (StatusCode::BAD_REQUEST,self.to_string())
+            DragoonError::PeerNotFound => (StatusCode::BAD_REQUEST, self.to_string()),
         };
         (status, Json(format!("{}", err_msg))).into_response()
     }

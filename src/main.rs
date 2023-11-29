@@ -1,8 +1,8 @@
 mod app;
 mod commands;
+mod dragoon;
 mod dragoon_network;
 mod error;
-mod dragoon;
 
 use axum::routing::get;
 use axum::Router;

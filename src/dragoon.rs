@@ -1,31 +1,32 @@
+use futures::future::{BoxFuture, Either};
+use futures::{future, ready, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use futures_timer::Delay;
+use libp2p::core::upgrade::ReadyUpgrade;
+use libp2p::core::Endpoint;
+use libp2p::identity::PublicKey;
+use libp2p::swarm::behaviour::ConnectionEstablished;
+use libp2p::swarm::handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound};
+use libp2p::swarm::{
+    dial_opts, ConnectionClosed, ConnectionDenied, ConnectionHandler, ConnectionHandlerEvent,
+    ConnectionId, DialError, DialFailure, FromSwarm, ListenAddresses, NetworkBehaviour,
+    NotifyHandler, SubstreamProtocol, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
+};
+use libp2p::{Multiaddr, PeerId, Stream, StreamProtocol};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::{fmt, io};
 use std::error::Error;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, future, ready};
-use futures::future::{BoxFuture, Either};
-use libp2p::identity::PublicKey;
-use libp2p::{Multiaddr, PeerId, Stream, StreamProtocol};
-use libp2p::core::Endpoint;
-use libp2p::core::upgrade::ReadyUpgrade;
-use libp2p::swarm::{ConnectionClosed, ConnectionDenied, ConnectionHandler, ConnectionHandlerEvent, ConnectionId, dial_opts, DialError, DialFailure, FromSwarm, ListenAddresses, NetworkBehaviour, NotifyHandler, SubstreamProtocol, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm};
-use libp2p::swarm::behaviour::ConnectionEstablished;
-use libp2p::swarm::handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound};
-use futures_timer::Delay;
+use std::{fmt, io};
 
 #[derive(Debug)]
 pub enum InEvent {
-    Send(Vec<u8>)
+    Send(Vec<u8>),
 }
 
 #[derive(Debug)]
 pub enum Event {
-    Sent {
-        peer: PeerId,
-    }
+    Sent { peer: PeerId },
 }
-
 
 #[derive(Debug)]
 pub enum Failure {
@@ -75,7 +76,6 @@ pub struct Handler {
     network_send_task: Vec<DragoonSendFuture>,
     network_recv_task: Vec<DragoonRecvFuture>,
     data_to_send: VecDeque<Vec<u8>>,
-
 }
 
 impl Handler {
@@ -85,7 +85,7 @@ impl Handler {
             events: VecDeque::new(),
             network_send_task: Vec::new(),
             network_recv_task: Vec::new(),
-            data_to_send: VecDeque::new()
+            data_to_send: VecDeque::new(),
         }
     }
 
@@ -93,16 +93,13 @@ impl Handler {
         &mut self,
         FullyNegotiatedInbound {
             protocol: output, ..
-        }:FullyNegotiatedInbound<
+        }: FullyNegotiatedInbound<
             <Self as ConnectionHandler>::InboundProtocol,
             <Self as ConnectionHandler>::InboundOpenInfo,
         >,
     ) {
-        self.network_recv_task.push(
-            Box::pin(
-                dragoon_receive_data(output)
-            )
-        );
+        self.network_recv_task
+            .push(Box::pin(dragoon_receive_data(output)));
     }
 
     fn on_fully_negotiated_outbound(
@@ -115,15 +112,11 @@ impl Handler {
         >,
     ) {
         if let Some(data) = self.data_to_send.pop_front() {
-            self.network_send_task.push(
-                Box::pin(
-                    dragoon_send(output, data, Duration::new(10, 0))
-                )
-            );
+            self.network_send_task
+                .push(Box::pin(dragoon_send(output, data, Duration::new(10, 0))));
         }
     }
 }
-
 
 impl ConnectionHandler for Handler {
     type FromBehaviour = InEvent;
@@ -134,21 +127,21 @@ impl ConnectionHandler for Handler {
     type OutboundOpenInfo = ();
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
-        SubstreamProtocol::new(
-            ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")), ()
-        )
+        SubstreamProtocol::new(ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")), ())
     }
 
     #[tracing::instrument(level = "trace", name = "ConnectionHandler::poll", skip(self, cx))]
     fn poll(
         &mut self,
-        cx: &mut Context<'_>
-    ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
+        cx: &mut Context<'_>,
+    ) -> Poll<
+        ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
+    > {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
         let mut to_remove = Vec::new();
-        for (id,fut) in &mut self.network_send_task.iter_mut().enumerate() {
+        for (id, fut) in &mut self.network_send_task.iter_mut().enumerate() {
             match ready!(fut.as_mut().poll(cx)) {
                 Ok(o) => {
                     println!("send task finished {o:?}");
@@ -164,12 +157,11 @@ impl ConnectionHandler for Handler {
         }
 
         to_remove.clear();
-        for (id,fut) in &mut self.network_recv_task.iter_mut().enumerate() {
+        for (id, fut) in &mut self.network_recv_task.iter_mut().enumerate() {
             match ready!(fut.as_mut().poll(cx)) {
                 Ok(o) => {
                     println!("recvtask finished {o:?}");
                     to_remove.push(id);
-
                 }
                 Err(e) => {
                     println!("recvtask error {e}");
@@ -188,12 +180,13 @@ impl ConnectionHandler for Handler {
             InEvent::Send(data) => {
                 println!("send data for {}", self.remote_peer_id);
                 self.data_to_send.push_back(data);
-                self.events.push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
-                    protocol: SubstreamProtocol::new(
-                        ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")),
-                        ()
-                    ),
-                });
+                self.events
+                    .push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
+                        protocol: SubstreamProtocol::new(
+                            ReadyUpgrade::new(StreamProtocol::new("/dragoon/1.0.0")),
+                            (),
+                        ),
+                    });
             }
         }
     }
@@ -204,14 +197,15 @@ impl ConnectionHandler for Handler {
             Self::InboundProtocol,
             Self::OutboundProtocol,
             Self::InboundOpenInfo,
-            Self::OutboundOpenInfo
-        >) {
+            Self::OutboundOpenInfo,
+        >,
+    ) {
         println!("Handler::on_connection_event: {event:?}");
         match event {
             ConnectionEvent::FullyNegotiatedInbound(protocol, ..) => {
                 self.on_fully_negotiated_inbound(protocol)
             }
-            ConnectionEvent::FullyNegotiatedOutbound(protocol,..) => {
+            ConnectionEvent::FullyNegotiatedOutbound(protocol, ..) => {
                 self.on_fully_negotiated_outbound(protocol)
             }
             ConnectionEvent::LocalProtocolsChange(_) => {
@@ -236,7 +230,7 @@ pub struct Behaviour {
     connected_peers: HashSet<PeerId>,
     listen_addresses: ListenAddresses,
     connections: HashMap<ConnectionId, PeerId>,
-    handlers: HashMap<PeerId,Handler>,
+    handlers: HashMap<PeerId, Handler>,
     events: VecDeque<ToSwarm<Event, InEvent>>,
 }
 
@@ -300,7 +294,6 @@ impl Behaviour {
                         //self.address_failed(peer_id, addr)
                     }
                 }
-
             }
             DialError::DialPeerConditionFalse(
                 dial_opts::PeerCondition::Disconnected
@@ -338,11 +331,23 @@ impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = Handler;
     type ToSwarm = Event;
 
-    fn handle_established_inbound_connection(&mut self, _connection_id: ConnectionId, peer: PeerId, local_addr: &Multiaddr, remote_addr: &Multiaddr) -> Result<THandler<Self>, ConnectionDenied> {
+    fn handle_established_inbound_connection(
+        &mut self,
+        _connection_id: ConnectionId,
+        peer: PeerId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(Handler::new(peer))
     }
 
-    fn handle_established_outbound_connection(&mut self, _connection_id: ConnectionId, peer: PeerId, addr: &Multiaddr, role_override: Endpoint) -> Result<THandler<Self>, ConnectionDenied> {
+    fn handle_established_outbound_connection(
+        &mut self,
+        _connection_id: ConnectionId,
+        peer: PeerId,
+        addr: &Multiaddr,
+        role_override: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
         Ok(Handler::new(peer))
     }
 
@@ -363,7 +368,12 @@ impl NetworkBehaviour for Behaviour {
         }
     }
 
-    fn on_connection_handler_event(&mut self, peer: PeerId, _connection_id: ConnectionId, _event: THandlerOutEvent<Self>) {
+    fn on_connection_handler_event(
+        &mut self,
+        peer: PeerId,
+        _connection_id: ConnectionId,
+        _event: THandlerOutEvent<Self>,
+    ) {
         println!("Behaviour::on_connection_handler_event, push Event");
     }
 
@@ -377,7 +387,11 @@ impl NetworkBehaviour for Behaviour {
     }
 }
 
-async fn dragoon_send(stream: Stream, data: Vec<u8>, timeout: Duration) -> Result<(Stream, Duration), Failure> {
+async fn dragoon_send(
+    stream: Stream,
+    data: Vec<u8>,
+    timeout: Duration,
+) -> Result<(Stream, Duration), Failure> {
     println!("dragoon_send");
 
     let req = dragoon_send_data(stream, data);
@@ -391,8 +405,8 @@ async fn dragoon_send(stream: Stream, data: Vec<u8>, timeout: Duration) -> Resul
 }
 
 pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: Vec<u8>) -> io::Result<(S, Duration)>
-    where
-        S: AsyncRead + AsyncWrite + Unpin,
+where
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     stream.write_all(data.as_slice()).await?;
     stream.flush().await?;
@@ -400,7 +414,7 @@ pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: Vec<u8>) -> io::Re
     stream.read_exact(&mut recv_payload).await?;
     println!("response payload: {recv_payload:?}");
     let started = Instant::now();
-    if recv_payload == [42,42,42,42] {
+    if recv_payload == [42, 42, 42, 42] {
         Ok((stream, started.elapsed()))
     } else {
         Err(io::Error::new(
@@ -420,14 +434,14 @@ pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: Vec<u8>) -> io::Re
 // }
 
 pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<S>
-    where
-        S: AsyncRead + AsyncWrite + Unpin,
+where
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut payload = [0u8; 64];
     stream.read(&mut payload).await?;
     let str = String::from_utf8(payload.to_vec()).unwrap();
     println!("received payload: {:?}", str);
-    let mut response = [42,42,42,42];
+    let mut response = [42, 42, 42, 42];
     stream.write_all(&response).await?;
     stream.flush().await?;
     Ok(stream)

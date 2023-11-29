@@ -104,7 +104,7 @@ pub(crate) enum DragoonCommand {
         data: String,
         peerid: String,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
-    }
+    },
 }
 
 impl std::fmt::Display for DragoonCommand {
@@ -128,7 +128,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::PutRecord { .. } => write!(f, "put-record"),
             DragoonCommand::GetRecord { .. } => write!(f, "get-record"),
             DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
-            DragoonCommand::DragoonSend {.. } => write!(f, "dragoon-send"),
+            DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
         }
     }
 }
@@ -341,9 +341,7 @@ pub(crate) async fn start_provide(
     }
 }
 
-pub(crate) async fn dragoon_peers(
-    State(state): State<Arc<AppState>>,
-) -> Response {
+pub(crate) async fn dragoon_peers(State(state): State<Arc<AppState>>) -> Response {
     let (sender, receiver) = oneshot::channel();
     let cmd = DragoonCommand::DragoonPeers { sender };
     let cmd_name = cmd.to_string();
@@ -360,18 +358,23 @@ pub(crate) async fn dragoon_peers(
                         .map(|peer| peer.to_base58())
                         .collect::<Vec<String>>(),
                 ),
-            ).into_response()
-        }
+            )
+                .into_response(),
+        },
         Err(e) => handle_canceled(e, &cmd_name),
     }
 }
 
 pub(crate) async fn dragoon_send(
-    Path((peerid, data)) : Path<(String, String)>,
+    Path((peerid, data)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let (sender, receiver) = oneshot::channel();
-    let cmd = DragoonCommand::DragoonSend { data, peerid, sender };
+    let cmd = DragoonCommand::DragoonSend {
+        data,
+        peerid,
+        sender,
+    };
     let cmd_name = cmd.to_string();
     send_command(cmd, state).await;
 
@@ -379,7 +382,7 @@ pub(crate) async fn dragoon_send(
         Ok(res) => match res {
             Ok(_) => (StatusCode::OK, Json("")).into_response(),
             Err(e) => handle_dragoon_error(e, &cmd_name),
-        }
+        },
         Err(e) => handle_canceled(e, &cmd_name),
     }
 }
