@@ -10,11 +10,9 @@ use ark_poly::DenseUVPolynomial;
 use ark_poly_commit::kzg10::Powers;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
 use reed_solomon_erasure::galois_prime::Field as GF;
-use semi_avid_pc::fec::decode;
 use tracing::{debug, info, warn};
 
-use semi_avid_pc::{encode, setup, Block};
-use semi_avid_pc::{verify, Shard};
+use semi_avid_pc::{encode, fec::decode, setup, verify, Block, Shard};
 
 type UniPoly12_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 
