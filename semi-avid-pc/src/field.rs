@@ -172,8 +172,30 @@ mod tests {
     fn build_interleaved_polynomials() {
         build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
             12,
+            2,
+            vec![vec![0, 2, 4, 6, 8, 10], vec![1, 3, 5, 7, 9, 11]],
+        );
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
+            12,
             3,
             vec![vec![0, 3, 6, 9], vec![1, 4, 7, 10], vec![2, 5, 8, 11]],
+        );
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
+            12,
+            4,
+            vec![vec![0, 4, 8], vec![1, 5, 9], vec![2, 6, 10], vec![3, 7, 11]],
+        );
+        build_interleaved_polynomials_template::<Bls12_381, UniPoly381>(
+            12,
+            6,
+            vec![
+                vec![0, 6],
+                vec![1, 7],
+                vec![2, 8],
+                vec![3, 9],
+                vec![4, 10],
+                vec![5, 11],
+            ],
         );
     }
 }
