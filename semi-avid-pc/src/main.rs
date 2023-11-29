@@ -11,10 +11,10 @@ use ark_poly_commit::kzg10::Powers;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
 use reed_solomon_erasure::galois_prime::Field as GF;
 use semi_avid_pc::fec::decode;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
-use semi_avid_pc::verify;
 use semi_avid_pc::{encode, setup, Block};
+use semi_avid_pc::{verify, Shard};
 
 type UniPoly12_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 
@@ -87,8 +87,24 @@ fn generate_powers(bytes: &[u8], powers_file: &str) -> Result<(), std::io::Error
     Ok(())
 }
 
+fn read_block<E: Pairing>(block_files: &[String]) -> Vec<(String, Block<E>)> {
+    block_files
+        .iter()
+        .filter_map(|f| match std::fs::read(f) {
+            Ok(bytes) => Some((f, bytes)),
+            Err(_) => None,
+        })
+        .map(|(f, s)| {
+            (
+                f.clone(),
+                Block::<E>::deserialize_with_mode(&s[..], COMPRESS, VALIDATE).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>()
+}
+
 fn verify_blocks<E, P>(
-    block_files: &[String],
+    blocks: &[(String, Block<E>)],
     powers: Powers<E>,
 ) -> Result<(), ark_serialize::SerializationError>
 where
@@ -96,28 +112,14 @@ where
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
     for<'a, 'b> &'a P: Div<&'b P, Output = P>,
 {
-    let mut res = vec![];
-
-    for block_file in block_files {
-        if let Ok(serialized) = std::fs::read(&block_file) {
-            debug!("deserializing block from `{}`", block_file);
-            let block = Block::<E>::deserialize_with_mode(&serialized[..], COMPRESS, VALIDATE)?;
-            if verify::<E, P>(&block, &powers) {
-                info!("block `{:?} is valid`", block_file);
-                res.push(0);
-            } else {
-                error!("block `{:?} is not valid`", block_file);
-                res.push(1);
-            }
-        } else {
-            warn!("could not read from `{:?}`", block_file);
-            res.push(2);
-        }
-    }
+    let res: Vec<_> = blocks
+        .iter()
+        .map(|(f, b)| (f, verify::<E, P>(&b, &powers)))
+        .collect();
 
     eprint!("[");
-    for (block, status) in block_files.iter().zip(res.iter()) {
-        eprint!("{{block: {:?}, status: {}}}", block, status);
+    for (f, v) in res {
+        eprint!("{{block: {:?}, status: {}}}", f, v);
     }
     eprint!("]");
 
@@ -173,15 +175,11 @@ fn main() {
     }
 
     if do_reconstruct_data {
-        let blocks = block_files
+        let blocks: Vec<Shard> = read_block::<Bls12_381>(&block_files)
             .iter()
-            .filter_map(|f| std::fs::read(&f).ok())
-            .map(|s| {
-                Block::<Bls12_381>::deserialize_with_mode(&s[..], COMPRESS, VALIDATE)
-                    .unwrap()
-                    .shard
-            })
-            .collect::<Vec<_>>();
+            .cloned()
+            .map(|b| b.1.shard)
+            .collect();
         eprintln!("{:?}", decode::<GF>(blocks).unwrap());
 
         exit(0);
@@ -198,7 +196,8 @@ fn main() {
     };
 
     if do_verify_blocks {
-        verify_blocks::<Bls12_381, UniPoly12_381>(&block_files, powers).unwrap();
+        verify_blocks::<Bls12_381, UniPoly12_381>(&read_block::<Bls12_381>(&block_files), powers)
+            .unwrap();
         exit(0);
     }
 
