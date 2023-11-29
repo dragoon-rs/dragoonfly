@@ -137,6 +137,11 @@ mod tests {
         let nb_bytes = 11 * (<Bls12_381 as Pairing>::ScalarField::MODULUS_BIT_SIZE as usize / 8);
         split_data_template::<Bls12_381>(&bytes()[..nb_bytes], 1, Some(11));
         split_data_template::<Bls12_381>(&bytes()[..nb_bytes], 8, Some(16));
+
+        let nb_bytes =
+            11 * (<Bls12_381 as Pairing>::ScalarField::MODULUS_BIT_SIZE as usize / 8) - 10;
+        split_data_template::<Bls12_381>(&bytes()[..nb_bytes], 1, Some(11));
+        split_data_template::<Bls12_381>(&bytes()[..nb_bytes], 8, Some(16));
     }
 
     fn build_interleaved_polynomials_template<E, P>()
