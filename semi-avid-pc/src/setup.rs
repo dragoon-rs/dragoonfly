@@ -13,7 +13,7 @@ use ark_std::test_rng;
 pub fn trim<E: Pairing>(
     pp: UniversalParams<E>,
     supported_degree: usize,
-) -> Result<(Powers<'static, E>, VerifierKey<E>), ark_poly_commit::Error> {
+) -> (Powers<'static, E>, VerifierKey<E>) {
     let powers_of_g = pp.powers_of_g[..=supported_degree].to_vec();
     let powers_of_gamma_g = (0..=supported_degree)
         .map(|i| pp.powers_of_gamma_g[&i])
@@ -32,7 +32,7 @@ pub fn trim<E: Pairing>(
         prepared_beta_h: pp.prepared_beta_h.clone(),
     };
 
-    Ok((powers, vk))
+    (powers, vk)
 }
 
 pub fn random<E, P>(nb_bytes: usize) -> Result<Powers<'static, E>, ark_poly_commit::Error>
@@ -46,7 +46,7 @@ where
     let rng = &mut test_rng();
 
     let params = KZG10::<E, P>::setup(degree, false, rng)?;
-    let (powers, _) = trim(params, degree)?;
+    let (powers, _) = trim(params, degree);
 
     Ok(powers)
 }

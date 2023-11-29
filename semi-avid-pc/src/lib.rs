@@ -228,7 +228,7 @@ mod tests {
         let rng = &mut test_rng();
 
         let params = KZG10::<E, P>::setup(degree, false, rng)?;
-        let (powers, _) = trim(params, degree)?;
+        let (powers, _) = trim(params, degree);
 
         let elements = field::split_data_into_field_elements::<E>(bytes, k);
         let nb_polynomials = elements.len() / k;
