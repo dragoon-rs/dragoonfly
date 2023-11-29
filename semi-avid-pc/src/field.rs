@@ -2,7 +2,7 @@ use ark_ec::pairing::Pairing;
 use ark_ff::PrimeField;
 use ark_poly::DenseUVPolynomial;
 use ark_std::ops::Div;
-use ark_std::Zero;
+use ark_std::One;
 
 /// split a sequence of raw bytes into valid field elements
 ///
@@ -21,7 +21,7 @@ pub(crate) fn split_data_into_field_elements<E: Pairing>(
     if elements.len() % modulus != 0 {
         elements.resize(
             (elements.len() / modulus + 1) * modulus,
-            E::ScalarField::zero(),
+            E::ScalarField::one(),
         );
     }
 
