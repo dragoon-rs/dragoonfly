@@ -17,6 +17,7 @@ axum = "0.6.20"
 serde = { version = "1.0.192", features = ["derive"] }
 regex = "1.10.2"
 thiserror = "1.0.50"
+futures-timer = { version = "3.0.2", features = [] }
 
 [dependencies.libp2p]
 default-features = false

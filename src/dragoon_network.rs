@@ -18,11 +18,15 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::commands::DragoonCommand;
-use crate::error::DragoonError::{BadListener, BootstrapError, DialError, ProviderError};
+use crate::dragoon::Behaviour;
+use crate::error::DragoonError::{
+    BadListener, BootstrapError, DialError, PeerNotFound, ProviderError,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
@@ -56,6 +60,7 @@ pub(crate) async fn create_swarm(
                 )],
                 request_response::Config::default(),
             ),
+            dragoon: Behaviour::new("/dragoon/1.0.0".to_string(), key.public()),
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60 * 60)))
         .build();
@@ -82,6 +87,7 @@ pub(crate) struct DragoonBehaviour {
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
     identify: identify::Behaviour,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
+    dragoon: Behaviour,
 }
 
 pub(crate) struct DragoonNetwork {
@@ -326,11 +332,15 @@ impl DragoonNetwork {
                 info,
             })) => {
                 info!("Received identify info '{:?}' from {}", info, peer_id);
-                self.swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .add_address(&peer_id, info.listen_addrs.get(0).unwrap().clone());
-                info!("Added peer {}", peer_id);
+                if let Some(addr) = info.listen_addrs.get(0) {
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .add_address(&peer_id, addr.clone());
+                    info!("Added peer {}", peer_id);
+                } else {
+                    error!("Peer {} not added, no listen address", peer_id);
+                }
             }
             #[cfg(feature = "file-sharing")]
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
@@ -604,6 +614,43 @@ impl DragoonNetwork {
                     .get_record(key.into_bytes().into());
                 self.pending_get_record.insert(id, sender);
             }
+            DragoonCommand::DragoonPeers { sender } => {
+                let peers = self.swarm.behaviour_mut().dragoon.get_connected_peer();
+                if sender
+                    .send(Ok(self.swarm.behaviour_mut().dragoon.get_connected_peer()))
+                    .is_err()
+                {
+                    error!("could not send result");
+                }
+            }
+            DragoonCommand::DragoonSend {
+                data,
+                peerid,
+                sender,
+            } => match PeerId::from_str(peerid.as_str()) {
+                Ok(peer) => {
+                    if self
+                        .swarm
+                        .behaviour_mut()
+                        .dragoon
+                        .send_data_to_peer(data, peer)
+                    {
+                        if sender.send(Ok(())).is_err() {
+                            error!("could not send result");
+                        }
+                    } else {
+                        let err = PeerNotFound;
+                        if sender.send(Err(Box::new(err))).is_err() {
+                            error!("Cannot send result");
+                        }
+                    }
+                }
+                Err(err) => {
+                    if sender.send(Err(Box::new(err))).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
+            },
         }
     }
 }

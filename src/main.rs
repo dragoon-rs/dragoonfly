@@ -2,6 +2,7 @@ mod app;
 mod commands;
 mod dragoon_network;
 mod error;
+mod dragoon;
 
 use axum::routing::get;
 use axum::Router;
@@ -37,7 +38,9 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/get-providers/:key", get(commands::get_providers))
         .route("/bootstrap", get(commands::bootstrap))
         .route("/put-record/:key/:value", get(commands::put_record))
-        .route("/get-record/:key", get(commands::get_record));
+        .route("/get-record/:key", get(commands::get_record))
+        .route("/dragoon/peers", get(commands::dragoon_peers))
+        .route("/dragoon/send/:peer/:data", get(commands::dragoon_send));
 
     #[cfg(feature = "file-sharing")]
     let router = router
