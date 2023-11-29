@@ -1,6 +1,14 @@
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use reed_solomon_erasure::{Error, Field, ReedSolomonNonSystematic};
 
-use crate::Shard;
+#[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct Shard {
+    pub k: u32,
+    pub i: u32,
+    pub hash: Vec<u8>,
+    pub bytes: Vec<u8>,
+    pub size: usize,
+}
 
 pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     let k = blocks[0].k;
@@ -33,7 +41,7 @@ mod tests {
     use rs_merkle::algorithms::Sha256;
     use rs_merkle::Hasher;
 
-    use crate::{fec::decode, Shard};
+    use crate::fec::{decode, Shard};
 
     const DATA: &[u8] = b"f\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0r\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0z\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 

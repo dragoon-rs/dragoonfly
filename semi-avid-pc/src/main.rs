@@ -12,7 +12,11 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate
 use reed_solomon_erasure::galois_prime::Field as GF;
 use tracing::{debug, info, warn};
 
-use semi_avid_pc::{encode, fec::decode, setup, verify, Block, Shard};
+use semi_avid_pc::{
+    encode,
+    fec::{decode, Shard},
+    setup, verify, Block,
+};
 
 type UniPoly12_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 

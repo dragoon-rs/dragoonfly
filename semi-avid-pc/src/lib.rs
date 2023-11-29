@@ -14,17 +14,8 @@ mod field;
 pub mod setup;
 
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct Shard {
-    k: u32,
-    i: u32,
-    hash: Vec<u8>,
-    bytes: Vec<u8>,
-    size: usize,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Block<E: Pairing> {
-    pub shard: Shard,
+    pub shard: fec::Shard,
     commit: Vec<Commitment<E>>,
     m: usize,
 }
@@ -77,7 +68,7 @@ where
         }
 
         proofs.push(Block {
-            shard: Shard {
+            shard: fec::Shard {
                 k: k as u32,
                 i: i as u32,
                 hash: hash.to_vec(),
