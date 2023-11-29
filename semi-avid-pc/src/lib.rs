@@ -15,15 +15,10 @@ pub mod setup;
 
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Shard {
-    /// the number of required shards for reconstruction
     k: u32,
-    /// the index of the current shard
     i: u32,
-    /// the hash of the original data
     hash: Vec<u8>,
-    /// the shard bytes
     bytes: Vec<u8>,
-    /// the data size
     size: usize,
 }
 
