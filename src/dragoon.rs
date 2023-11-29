@@ -3,7 +3,7 @@ use std::{fmt, io};
 use std::error::Error;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, future};
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, future, ready};
 use futures::future::{BoxFuture, Either};
 use libp2p::identity::PublicKey;
 use libp2p::{Multiaddr, PeerId, Stream, StreamProtocol};
@@ -67,10 +67,13 @@ impl Error for Failure {
 }
 
 type DragoonSendFuture = BoxFuture<'static, Result<(Stream, Duration), Failure>>;
+type DragoonRecvFuture = BoxFuture<'static, Result<Stream, io::Error>>;
 
 pub struct Handler {
     remote_peer_id: PeerId,
     events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), Event>>,
+    network_send_task: Vec<DragoonSendFuture>,
+    network_recv_task: Vec<DragoonRecvFuture>,
 
 }
 
@@ -78,7 +81,9 @@ impl Handler {
     pub fn new(remote_peer_id: PeerId) -> Self {
         Self {
             remote_peer_id,
-            events: VecDeque::new()
+            events: VecDeque::new(),
+            network_send_task: Vec::new(),
+            network_recv_task: Vec::new()
         }
     }
 
@@ -91,6 +96,11 @@ impl Handler {
             <Self as ConnectionHandler>::InboundOpenInfo,
         >,
     ) {
+        self.network_recv_task.push(
+            Box::pin(
+                dragoon_receive_data(output)
+            )
+        );
        // TODO:  dragoon_send(output, &[1, 2, 3, 4], Duration::new(10,0)).await
        //     .expect("TODO: panic message");
     }
@@ -104,7 +114,11 @@ impl Handler {
             <Self as ConnectionHandler>::OutboundOpenInfo,
         >,
     ) {
-
+        self.network_send_task.push(
+            Box::pin(
+                dragoon_send(output, &[1, 2, 3, 4], Duration::new(10,0))
+            )
+        );
     }
 }
 
@@ -123,14 +137,47 @@ impl ConnectionHandler for Handler {
         )
     }
 
-    #[tracing::instrument(level = "trace", name = "ConnectionHandler::poll", skip(self, _cx))]
+    #[tracing::instrument(level = "trace", name = "ConnectionHandler::poll", skip(self, cx))]
     fn poll(
         &mut self,
-        _cx: &mut Context<'_>
+        cx: &mut Context<'_>
     ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
         if let Some(event) = self.events.pop_front() {
             return Poll::Ready(event);
         }
+        let mut to_remove = Vec::new();
+        for (id,fut) in &mut self.network_send_task.iter_mut().enumerate() {
+            match ready!(fut.as_mut().poll(cx)) {
+                Ok(o) => {
+                    println!("send task finished {o:?}");
+                    to_remove.push(id);
+                }
+                Err(e) => {
+                    println!("send task error : {e}")
+                }
+            }
+        }
+        for &id in to_remove.iter().rev() {
+            self.network_send_task.remove(id);
+        }
+
+        to_remove.clear();
+        for (id,fut) in &mut self.network_recv_task.iter_mut().enumerate() {
+            match ready!(fut.as_mut().poll(cx)) {
+                Ok(o) => {
+                    println!("recvtask finished {o:?}");
+                    to_remove.push(id);
+
+                }
+                Err(e) => {
+                    println!("recvtask error {e}");
+                }
+            }
+        }
+        for &id in to_remove.iter().rev() {
+            self.network_recv_task.remove(id);
+        }
+
         return Poll::Pending;
     }
 
@@ -325,6 +372,8 @@ impl NetworkBehaviour for Behaviour {
 }
 
 async fn dragoon_send(stream: Stream, data: &[u8], timeout: Duration) -> Result<(Stream, Duration), Failure> {
+    println!("dragoon_send");
+
     let req = dragoon_send_data(stream, data);
     futures::pin_mut!(req);
 
@@ -343,6 +392,7 @@ pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: &[u8]) -> io::Resu
     stream.flush().await?;
     let mut recv_payload = [0u8; 4];
     stream.read_exact(&mut recv_payload).await?;
+    println!("response payload: {recv_payload:?}");
     let started = Instant::now();
     if recv_payload == [42,42,42,42] {
         Ok((stream, started.elapsed()))
@@ -354,12 +404,22 @@ pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: &[u8]) -> io::Resu
     }
 }
 
+// async fn dragoon_recv(mut stream: Stream) -> Result<(Stream), Failure> {
+//     println!("dragoon_recv");
+//     let mut payload = [0u8; 4];
+//     stream.read_exact(&mut payload).await?;
+//     stream.write_all(&payload).await?;
+//     stream.flush().await?;
+//     Ok(stream)
+// }
+
 pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<S>
     where
         S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut payload = [0u8; 4];
     stream.read_exact(&mut payload).await?;
+    println!("received payload: {payload:?}");
     let mut response = [42,42,42,42];
     stream.write_all(&response).await?;
     stream.flush().await?;
