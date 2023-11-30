@@ -5,6 +5,7 @@ use ark_ff::{BigInteger, Field, PrimeField};
 use ark_poly::DenseUVPolynomial;
 use ark_poly_commit::kzg10::{Commitment, Powers, Randomness, KZG10};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use fec::LinearCombinationElement;
 use rs_merkle::algorithms::Sha256;
 use rs_merkle::Hasher;
 use tracing::{debug, info};
@@ -70,7 +71,10 @@ where
         proofs.push(Block {
             shard: fec::Shard {
                 k: k as u32,
-                linear_combination: vec![(i as u32, 1)],
+                linear_combination: vec![LinearCombinationElement {
+                    index: i as u32,
+                    weight: 1,
+                }],
                 hash: hash.to_vec(),
                 bytes: shard,
                 size: nb_bytes,
@@ -164,8 +168,8 @@ where
         .shard
         .linear_combination
         .iter()
-        .map(|&(i, w)| {
-            let alpha = E::ScalarField::from_le_bytes_mod_order(&[i as u8]);
+        .map(|lce| {
+            let alpha = E::ScalarField::from_le_bytes_mod_order(&[lce.index as u8]);
 
             let f: E::G1 = block
                 .commit
@@ -176,7 +180,7 @@ where
                     commit.mul(alpha.pow([j as u64]))
                 })
                 .sum();
-            f.mul(E::ScalarField::from_le_bytes_mod_order(&[w as u8]))
+            f.mul(E::ScalarField::from_le_bytes_mod_order(&[lce.weight as u8]))
         })
         .sum();
     Ok(Into::<E::G1>::into(commit.0) == rhs)

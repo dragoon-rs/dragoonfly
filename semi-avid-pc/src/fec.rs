@@ -2,9 +2,15 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use reed_solomon_erasure::{Error, Field, ReedSolomonNonSystematic};
 
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct LinearCombinationElement {
+    pub index: u32,
+    pub weight: u32,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Shard {
     pub k: u32,
-    pub linear_combination: Vec<(u32, u32)>,
+    pub linear_combination: Vec<LinearCombinationElement>,
     pub hash: Vec<u8>,
     pub bytes: Vec<u8>,
     pub size: usize,
@@ -15,7 +21,7 @@ pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     let n = blocks
         .iter()
         // FIXME: this is incorrect
-        .map(|b| b.linear_combination[0].0)
+        .map(|b| b.linear_combination[0].index)
         .max()
         .unwrap_or(0)
         + 1;
@@ -28,7 +34,7 @@ pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     shards.resize(n as usize, None);
     for block in &blocks {
         // FIXME: this is incorrect
-        shards[block.linear_combination[0].0 as usize] = Some(F::deserialize(&block.bytes));
+        shards[block.linear_combination[0].index as usize] = Some(F::deserialize(&block.bytes));
     }
 
     ReedSolomonNonSystematic::<F>::vandermonde(k as usize, n as usize)?.reconstruct(&mut shards)?;
@@ -48,7 +54,7 @@ mod tests {
     use rs_merkle::algorithms::Sha256;
     use rs_merkle::Hasher;
 
-    use crate::fec::{decode, Shard};
+    use crate::fec::{decode, LinearCombinationElement, Shard};
 
     const DATA: &[u8] = b"f\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0r\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0z\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
@@ -96,7 +102,10 @@ mod tests {
                 }
                 blocks.push(Shard {
                     k: K as u32,
-                    linear_combination: vec![(i as u32, 1)],
+                    linear_combination: vec![LinearCombinationElement {
+                        index: i as u32,
+                        weight: 1,
+                    }],
                     hash: hash.clone(),
                     bytes: shard,
                     size: DATA.len(),
