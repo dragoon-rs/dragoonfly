@@ -153,14 +153,7 @@ where
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
     for<'a, 'b> &'a P: Div<&'b P, Output = P>,
 {
-    let mut elements = Vec::new();
-    for chunk in block
-        .shard
-        .bytes
-        .chunks((E::ScalarField::MODULUS_BIT_SIZE as usize) / 8 + 1)
-    {
-        elements.push(E::ScalarField::from_le_bytes_mod_order(chunk));
-    }
+    let elements = field::split_data_into_field_elements::<E>(&block.shard.bytes, 1);
     let polynomial = P::from_coefficients_vec(elements);
     let (commit, _) = KZG10::<E, P>::commit(verifier_key, &polynomial, None, None)?;
 
@@ -218,7 +211,7 @@ mod tests {
     use crate::{
         batch_verify, encode,
         fec::{LinearCombinationElement, Shard},
-        setup, verify, Block,
+        field, setup, verify, Block,
     };
 
     type UniPoly381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
@@ -367,6 +360,24 @@ mod tests {
             .expect("verification failed for bls12-381 with padding");
     }
 
+    fn u32_to_u8_vec(num: u32) -> Vec<u8> {
+        vec![
+            (num & 0xFF) as u8,
+            ((num >> 8) & 0xFF) as u8,
+            ((num >> 16) & 0xFF) as u8,
+            ((num >> 24) & 0xFF) as u8,
+        ]
+    }
+
+    #[test]
+    fn u32_to_u8_conversion() {
+        assert_eq!(u32_to_u8_vec(0u32), vec![0u8, 0u8, 0u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(1u32), vec![1u8, 0u8, 0u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(256u32), vec![0u8, 1u8, 0u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(65536u32), vec![0u8, 0u8, 1u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(16777216u32), vec![0u8, 0u8, 0u8, 1u8]);
+    }
+
     fn mul_shard<E: Pairing>(bytes: &[u8], mul: u32) -> Vec<u8> {
         if mul == 0 {
             return vec![0u8; bytes.len()];
@@ -374,13 +385,12 @@ mod tests {
             return bytes.to_vec();
         }
 
-        let mut elements = Vec::new();
-        for chunk in bytes.chunks((E::ScalarField::MODULUS_BIT_SIZE as usize) / 8 + 1) {
-            elements.push(
-                E::ScalarField::from_le_bytes_mod_order(chunk)
-                    .mul(E::ScalarField::from_le_bytes_mod_order(&[2])),
-            );
-        }
+        let mul = E::ScalarField::from_le_bytes_mod_order(&u32_to_u8_vec(mul));
+
+        let elements = field::split_data_into_field_elements::<E>(&bytes, 1)
+            .iter()
+            .map(|e| e.mul(mul))
+            .collect::<Vec<_>>();
         let mut shard = vec![];
         for e in elements {
             shard.append(&mut e.into_bigint().to_bytes_le());

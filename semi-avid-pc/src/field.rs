@@ -14,7 +14,7 @@ pub(crate) fn split_data_into_field_elements<E: Pairing>(
 ) -> Vec<E::ScalarField> {
     let mut elements = Vec::new();
 
-    for chunk in bytes.chunks((E::ScalarField::MODULUS_BIT_SIZE as usize) / 8) {
+    for chunk in bytes.chunks((E::ScalarField::MODULUS_BIT_SIZE as usize) / 8 + 1) {
         elements.push(E::ScalarField::from_le_bytes_mod_order(chunk));
     }
 
