@@ -208,5 +208,5 @@ fn main() {
         exit(0);
     }
 
-    dump_blocks(&encode::<Bls12_381, UniPoly12_381>(&bytes, k, n, powers).unwrap()).unwrap();
+    dump_blocks(&encode::<Bls12_381, UniPoly12_381>(&bytes, k, n, &powers).unwrap()).unwrap();
 }

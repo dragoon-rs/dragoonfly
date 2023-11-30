@@ -91,7 +91,7 @@ pub fn encode<E, P>(
     bytes: &[u8],
     k: usize,
     n: usize,
-    powers: Powers<E>,
+    powers: &Powers<E>,
 ) -> Result<Vec<Block<E>>, ark_poly_commit::Error>
 where
     E: Pairing,
