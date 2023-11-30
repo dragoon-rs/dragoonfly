@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::ops::{Add, Mul};
 
 use ark_ec::pairing::Pairing;
 use ark_ff::PrimeField;
@@ -51,6 +51,50 @@ impl Shard {
                 .collect(),
             hash: self.hash.clone(),
             bytes,
+            size: self.size,
+        }
+    }
+
+    pub fn combine<E: Pairing>(&self, alpha: u32, other: &Self, beta: u32) -> Self {
+        if alpha == 0 {
+            return other.clone();
+        } else if beta == 0 {
+            return self.clone();
+        }
+
+        let elements = {
+            let alpha = E::ScalarField::from_le_bytes_mod_order(&u32_to_u8_vec(alpha));
+            let beta = E::ScalarField::from_le_bytes_mod_order(&u32_to_u8_vec(beta));
+
+            let elements_self = field::split_data_into_field_elements::<E>(&self.bytes, 1);
+            let elements_other = field::split_data_into_field_elements::<E>(&other.bytes, 1);
+
+            elements_self
+                .iter()
+                .zip(elements_other.iter())
+                .map(|(es, eo)| es.mul(alpha).add(eo.mul(beta)))
+                .collect::<Vec<_>>()
+        };
+
+        let mut linear_combination = vec![];
+        for lce in &self.linear_combination {
+            linear_combination.push(LinearCombinationElement {
+                index: lce.index,
+                weight: lce.weight * alpha,
+            });
+        }
+        for lce in &other.linear_combination {
+            linear_combination.push(LinearCombinationElement {
+                index: lce.index,
+                weight: lce.weight * beta,
+            });
+        }
+
+        Shard {
+            k: self.k,
+            linear_combination,
+            hash: self.hash.clone(),
+            bytes: field::merge_elements_into_bytes::<E>(&elements),
             size: self.size,
         }
     }
