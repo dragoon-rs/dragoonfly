@@ -210,11 +210,16 @@ mod tests {
 
     use ark_bls12_381::Bls12_381;
     use ark_ec::pairing::Pairing;
-    use ark_ff::{Field, PrimeField};
+    use ark_ff::{BigInteger, Field, PrimeField};
     use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
     use ark_poly_commit::kzg10::Commitment;
+    use rs_merkle::{algorithms::Sha256, Hasher};
 
-    use crate::{batch_verify, encode, setup, verify, Block};
+    use crate::{
+        batch_verify, encode,
+        fec::{LinearCombinationElement, Shard},
+        setup, verify, Block,
+    };
 
     type UniPoly381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 
@@ -359,6 +364,85 @@ mod tests {
         verify_with_errors_template::<Bls12_381, UniPoly381>(&bytes, 4, 6)
             .expect("verification failed for bls12-381");
         verify_with_errors_template::<Bls12_381, UniPoly381>(&bytes[0..(bytes.len() - 10)], 4, 6)
+            .expect("verification failed for bls12-381 with padding");
+    }
+
+    fn mul_shard<E: Pairing>(bytes: &[u8], mul: u32) -> Vec<u8> {
+        if mul == 0 {
+            return vec![0u8; bytes.len()];
+        } else if mul == 1 {
+            return bytes.to_vec();
+        }
+
+        let mut elements = Vec::new();
+        for chunk in bytes.chunks((E::ScalarField::MODULUS_BIT_SIZE as usize) / 8 + 1) {
+            elements.push(
+                E::ScalarField::from_le_bytes_mod_order(chunk)
+                    .mul(E::ScalarField::from_le_bytes_mod_order(&[2])),
+            );
+        }
+        let mut shard = vec![];
+        for e in elements {
+            shard.append(&mut e.into_bigint().to_bytes_le());
+        }
+
+        shard
+    }
+
+    fn verify_recoding_template<E, P>(
+        bytes: &[u8],
+        k: usize,
+        n: usize,
+    ) -> Result<(), ark_poly_commit::Error>
+    where
+        E: Pairing,
+        P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
+        for<'a, 'b> &'a P: Div<&'b P, Output = P>,
+    {
+        let powers = setup::random(bytes.len()).unwrap();
+        let blocks = encode::<E, P>(bytes, k, n, &powers).unwrap();
+
+        let block = Block {
+            shard: Shard {
+                k: k as u32,
+                linear_combination: vec![LinearCombinationElement {
+                    index: 0,
+                    weight: 1,
+                }],
+                hash: Sha256::hash(bytes).to_vec(),
+                bytes: mul_shard::<E>(&blocks[0].shard.bytes, 1),
+                size: bytes.len(),
+            },
+            commit: blocks[0].commit.clone(),
+            m: blocks[0].m,
+        };
+        assert!(verify::<E, P>(&block, &powers)?);
+
+        let block = Block {
+            shard: Shard {
+                k: k as u32,
+                linear_combination: vec![LinearCombinationElement {
+                    index: 3,
+                    weight: 2,
+                }],
+                hash: Sha256::hash(bytes).to_vec(),
+                bytes: mul_shard::<E>(&blocks[3].shard.bytes, 2),
+                size: bytes.len(),
+            },
+            commit: blocks[3].commit.clone(),
+            m: blocks[3].m,
+        };
+        assert!(verify::<E, P>(&block, &powers)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn verify_recoding_2() {
+        let bytes = bytes::<Bls12_381>(4, 2);
+        verify_recoding_template::<Bls12_381, UniPoly381>(&bytes, 4, 6)
+            .expect("verification failed for bls12-381");
+        verify_recoding_template::<Bls12_381, UniPoly381>(&bytes[0..(bytes.len() - 10)], 4, 6)
             .expect("verification failed for bls12-381 with padding");
     }
 }
