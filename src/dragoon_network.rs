@@ -33,7 +33,7 @@ use crate::dragoon::DragoonEvent;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FileResponse(Vec<u8>);
+pub(crate) struct FileResponse(Option<Vec<u8>>);
 
 pub(crate) async fn create_swarm(
     id_keys: Keypair,
@@ -369,15 +369,44 @@ impl DragoonNetwork {
                         self.swarm
                             .behaviour_mut()
                             .request_response
-                            .send_response(channel, FileResponse(vec![1,2,3,4]));
+                            .send_response(channel, FileResponse(Some(vec![1,2,3,4])));
+                            return;
                     }
+                    if request.0 == "tata" {
+                        self.swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_response(channel, FileResponse(Some(vec![4,3,2,1])));
+                        return;
+                    }
+                    self.swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_response(channel, FileResponse(None));
                 }
-                request_response::Message::Response {
+                Message::Response {
                     request_id,
                     response,
                 } => {
                     if self.pending_request_file.contains_key(&request_id) {
                         info!("response: {:?}",response.0);
+                        if let Some(sender) = self.pending_request_file.remove(&request_id) {
+                            if let Some(res) = response.0 {
+                                if sender.send(Ok(res)).is_err() {
+                                    error!("Could not send result");
+                                }
+                            } else {
+                                let err = ProviderError(format!("data not found"));
+
+                                debug!("sending error {}", err);
+                                if sender.send(Err(Box::new(err))).is_err() {
+                                    error!("Could not send result");
+                                }
+                            }
+                        } else {
+                            error!("could not find {} in the request files", request_id);
+                        }
+
                     }
                 }
             }
