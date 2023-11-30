@@ -1,5 +1,5 @@
 use ark_ec::pairing::Pairing;
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField};
 use ark_poly::DenseUVPolynomial;
 use ark_std::ops::Div;
 use ark_std::One;
@@ -26,6 +26,15 @@ pub(crate) fn split_data_into_field_elements<E: Pairing>(
     }
 
     elements
+}
+
+pub(crate) fn merge_elements_into_bytes<E: Pairing>(elements: &[E::ScalarField]) -> Vec<u8> {
+    let mut bytes = vec![];
+    for e in elements {
+        bytes.append(&mut e.into_bigint().to_bytes_le());
+    }
+
+    bytes
 }
 
 // create a set of polynomials containing k coefficients (#polynomials = |elements| / k)

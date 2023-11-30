@@ -1,7 +1,7 @@
 use std::ops::{Div, Mul};
 
 use ark_ec::pairing::Pairing;
-use ark_ff::{BigInteger, Field, PrimeField};
+use ark_ff::{Field, PrimeField};
 use ark_poly::DenseUVPolynomial;
 use ark_poly_commit::kzg10::{Commitment, Powers, Randomness, KZG10};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -63,11 +63,6 @@ where
 
     let mut proofs = Vec::new();
     for (i, row) in evaluations.iter().enumerate() {
-        let mut shard = vec![];
-        for r in row {
-            shard.append(&mut r.into_bigint().to_bytes_le());
-        }
-
         proofs.push(Block {
             shard: fec::Shard {
                 k: k as u32,
@@ -76,7 +71,7 @@ where
                     weight: 1,
                 }],
                 hash: hash.to_vec(),
-                bytes: shard,
+                bytes: field::merge_elements_into_bytes::<E>(&row),
                 size: nb_bytes,
             },
             commit: commits.clone(),

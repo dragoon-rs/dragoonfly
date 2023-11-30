@@ -1,7 +1,7 @@
 use std::ops::Mul;
 
 use ark_ec::pairing::Pairing;
-use ark_ff::{BigInteger, PrimeField};
+use ark_ff::PrimeField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use reed_solomon_erasure::{Error, Field as GF, ReedSolomonNonSystematic};
 
@@ -34,12 +34,8 @@ impl Shard {
                     .iter()
                     .map(|e| e.mul(alpha))
                     .collect::<Vec<_>>();
-                let mut shard = vec![];
-                for e in elements {
-                    shard.append(&mut e.into_bigint().to_bytes_le());
-                }
 
-                shard
+                field::merge_elements_into_bytes::<E>(&elements)
             }
         };
 
@@ -102,12 +98,15 @@ pub fn decode<F: GF>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
 mod tests {
     use ark_bls12_381::Bls12_381;
     use ark_ec::pairing::Pairing;
-    use ark_ff::{BigInteger, PrimeField};
+    use ark_ff::PrimeField;
     use reed_solomon_erasure::galois_prime::Field as GF;
     use rs_merkle::algorithms::Sha256;
     use rs_merkle::Hasher;
 
-    use crate::fec::{decode, u32_to_u8_vec, LinearCombinationElement, Shard};
+    use crate::{
+        fec::{decode, u32_to_u8_vec, LinearCombinationElement, Shard},
+        field,
+    };
 
     const DATA: &[u8] = b"f\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0r\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0z\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
@@ -149,10 +148,6 @@ mod tests {
         let mut blocks = Vec::new();
         for (i, shard) in shards.iter().enumerate() {
             if let Some(bytes) = shard {
-                let mut shard = vec![];
-                for r in bytes {
-                    shard.append(&mut r.into_bigint().to_bytes_le());
-                }
                 blocks.push(Shard {
                     k: K as u32,
                     linear_combination: vec![LinearCombinationElement {
@@ -160,7 +155,7 @@ mod tests {
                         weight: 1,
                     }],
                     hash: hash.clone(),
-                    bytes: shard,
+                    bytes: field::merge_elements_into_bytes::<Bls12_381>(&bytes),
                     size: DATA.len(),
                 });
             }
