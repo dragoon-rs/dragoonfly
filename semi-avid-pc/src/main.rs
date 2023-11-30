@@ -108,10 +108,7 @@ fn read_block<E: Pairing>(block_files: &[String]) -> Vec<(String, Block<E>)> {
         .collect::<Vec<_>>()
 }
 
-fn verify_blocks<E, P>(
-    blocks: &[(String, Block<E>)],
-    powers: Powers<E>,
-) -> Result<(), ark_serialize::SerializationError>
+fn verify_blocks<E, P>(blocks: &[(String, Block<E>)], powers: Powers<E>)
 where
     E: Pairing,
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
@@ -128,8 +125,6 @@ where
         eprint!("{{block: {:?}, status: {}}}", f, v);
     }
     eprint!("]");
-
-    Ok(())
 }
 
 fn dump_blocks<E: Pairing>(blocks: &[Block<E>]) -> Result<(), std::io::Error> {
@@ -203,8 +198,7 @@ fn main() {
     };
 
     if do_verify_blocks {
-        verify_blocks::<Bls12_381, UniPoly12_381>(&read_block::<Bls12_381>(&block_files), powers)
-            .unwrap();
+        verify_blocks::<Bls12_381, UniPoly12_381>(&read_block::<Bls12_381>(&block_files), powers);
         exit(0);
     }
 

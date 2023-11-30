@@ -217,8 +217,8 @@ mod tests {
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
-        let powers = setup::random(bytes.len()).unwrap();
-        let blocks = encode::<E, P>(bytes, k, n, &powers).unwrap();
+        let powers = setup::random(bytes.len())?;
+        let blocks = encode::<E, P>(bytes, k, n, &powers)?;
 
         for block in &blocks {
             assert!(verify::<E, P>(block, &powers)?);
@@ -290,8 +290,8 @@ mod tests {
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
-        let powers = setup::random(bytes.len()).unwrap();
-        let blocks = encode::<E, P>(bytes, k, n, &powers).unwrap();
+        let powers = setup::random(bytes.len())?;
+        let blocks = encode::<E, P>(bytes, k, n, &powers)?;
 
         for block in &blocks {
             assert!(verify::<E, P>(block, &powers)?);
@@ -360,8 +360,8 @@ mod tests {
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
-        let powers = setup::random(bytes.len()).unwrap();
-        let blocks = encode::<E, P>(bytes, k, n, &powers).unwrap();
+        let powers = setup::random(bytes.len())?;
+        let blocks = encode::<E, P>(bytes, k, n, &powers)?;
 
         let block = Block {
             shard: blocks[0].shard.mul::<E>(1),
