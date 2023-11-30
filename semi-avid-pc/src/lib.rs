@@ -212,12 +212,9 @@ mod tests {
     use ark_ec::pairing::Pairing;
     use ark_ff::{Field, PrimeField};
     use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
-    use ark_poly_commit::kzg10::{Commitment, Powers, KZG10};
-    use ark_std::test_rng;
-    use rs_merkle::algorithms::Sha256;
-    use rs_merkle::Hasher;
+    use ark_poly_commit::kzg10::Commitment;
 
-    use crate::{batch_verify, commit, field, prove, setup::trim, verify, Block};
+    use crate::{batch_verify, encode, setup, verify, Block};
 
     type UniPoly381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 
@@ -226,60 +223,20 @@ mod tests {
         include_bytes!("../../res/dragoon_133x133.png")[0..nb_bytes].to_vec()
     }
 
-    fn test_setup<E, P>(
-        bytes: &[u8],
-        k: usize,
-        n: usize,
-    ) -> Result<(Vec<Block<E>>, Powers<E>), ark_poly_commit::Error>
-    where
-        E: Pairing,
-        P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
-        for<'a, 'b> &'a P: Div<&'b P, Output = P>,
-    {
-        let degree = bytes.len() / (E::ScalarField::MODULUS_BIT_SIZE as usize / 8);
-
-        let rng = &mut test_rng();
-
-        let params = KZG10::<E, P>::setup(degree, false, rng)?;
-        let (powers, _) = trim(params, degree);
-
-        let elements = field::split_data_into_field_elements::<E>(bytes, k);
-        let nb_polynomials = elements.len() / k;
-        let polynomials =
-            field::build_interleaved_polynomials::<E, P>(&elements, nb_polynomials).unwrap();
-
-        let polynomials_to_commit = (0..polynomials[0].coeffs().len())
-            .map(|i| P::from_coefficients_vec(polynomials.iter().map(|p| p.coeffs()[i]).collect()))
-            .collect::<Vec<P>>();
-
-        let (commits, _) = commit(&powers, &polynomials_to_commit).unwrap();
-
-        let points: Vec<E::ScalarField> = (0..n)
-            .map(|i| E::ScalarField::from_le_bytes_mod_order(&[i as u8]))
-            .collect();
-
-        let hash = Sha256::hash(bytes);
-
-        let blocks = prove::<E, P>(commits, hash, bytes.len(), polynomials, &points)
-            .expect("Semi-AVID-PR proof failed");
-
-        Ok((blocks, powers))
-    }
-
     fn verify_template<E, P>(bytes: &[u8], k: usize, n: usize) -> Result<(), ark_poly_commit::Error>
     where
         E: Pairing,
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
-        let (blocks, verifier_key) =
-            test_setup::<E, P>(bytes, k, n).expect("proof failed for bls12-381");
+        let powers = setup::random(bytes.len()).unwrap();
+        let blocks = encode::<E, P>(bytes, k, n, &powers).unwrap();
 
         for block in &blocks {
-            assert!(verify::<E, P>(block, &verifier_key)?);
+            assert!(verify::<E, P>(block, &powers)?);
         }
 
-        assert!(batch_verify(&blocks[1..3], &verifier_key)?);
+        assert!(batch_verify(&blocks[1..3], &powers)?);
 
         Ok(())
     }
@@ -345,11 +302,11 @@ mod tests {
         P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
-        let (blocks, verifier_key) =
-            test_setup::<E, P>(bytes, k, n).expect("proof failed for bls12-381");
+        let powers = setup::random(bytes.len()).unwrap();
+        let blocks = encode::<E, P>(bytes, k, n, &powers).unwrap();
 
         for block in &blocks {
-            assert!(verify::<E, P>(block, &verifier_key)?);
+            assert!(verify::<E, P>(block, &powers)?);
         }
 
         let mut corrupted_block = blocks[0].clone();
@@ -359,7 +316,7 @@ mod tests {
         commits[0] = commits[0].mul(a.pow([4321_u64]));
         corrupted_block.commit = commits.iter().map(|&c| Commitment(c.into())).collect();
 
-        assert!(!verify::<E, P>(&corrupted_block, &verifier_key)?);
+        assert!(!verify::<E, P>(&corrupted_block, &powers)?);
 
         // let's build some blocks containing errors
         let mut blocks_with_errors = Vec::new();
@@ -370,10 +327,10 @@ mod tests {
             commit: b3.commit.clone(),
             m: b3.m,
         });
-        assert!(batch_verify(blocks_with_errors.as_slice(), &verifier_key)?);
+        assert!(batch_verify(blocks_with_errors.as_slice(), &powers)?);
 
         blocks_with_errors.push(corrupted_block);
-        assert!(!batch_verify(blocks_with_errors.as_slice(), &verifier_key)?);
+        assert!(!batch_verify(blocks_with_errors.as_slice(), &powers)?);
 
         Ok(())
     }
