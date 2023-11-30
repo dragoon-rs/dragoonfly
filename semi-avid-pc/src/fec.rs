@@ -216,4 +216,86 @@ mod tests {
         assert_eq!(u32_to_u8_vec(65536u32), vec![0u8, 0u8, 1u8, 0u8]);
         assert_eq!(u32_to_u8_vec(16777216u32), vec![0u8, 0u8, 0u8, 1u8]);
     }
+
+    fn create_fake_shard(linear_combination: &[LinearCombinationElement], bytes: &[u8]) -> Shard {
+        let mut bytes = bytes.to_vec();
+        bytes.resize(32, 0);
+
+        Shard {
+            k: 0,
+            linear_combination: linear_combination.to_vec(),
+            hash: vec![],
+            bytes,
+            size: 0,
+        }
+    }
+
+    #[test]
+    fn recoding() {
+        let a = create_fake_shard(
+            &[LinearCombinationElement {
+                index: 0,
+                weight: 1,
+            }],
+            &[1, 2, 3],
+        );
+        let b = create_fake_shard(
+            &[LinearCombinationElement {
+                index: 1,
+                weight: 1,
+            }],
+            &[4, 5, 6],
+        );
+
+        assert_eq!(
+            a.mul::<Bls12_381>(2),
+            create_fake_shard(
+                &[LinearCombinationElement {
+                    index: 0,
+                    weight: 2,
+                }],
+                &[2, 4, 6],
+            )
+        );
+
+        let c = a.combine::<Bls12_381>(3, &b, 5);
+
+        assert_eq!(
+            c,
+            create_fake_shard(
+                &[
+                    LinearCombinationElement {
+                        index: 0,
+                        weight: 3,
+                    },
+                    LinearCombinationElement {
+                        index: 1,
+                        weight: 5,
+                    }
+                ],
+                &[23, 31, 39]
+            )
+        );
+
+        assert_eq!(
+            c.combine::<Bls12_381>(2, &a, 4),
+            create_fake_shard(
+                &[
+                    LinearCombinationElement {
+                        index: 0,
+                        weight: 6,
+                    },
+                    LinearCombinationElement {
+                        index: 1,
+                        weight: 10,
+                    },
+                    LinearCombinationElement {
+                        index: 0,
+                        weight: 4,
+                    }
+                ],
+                &[50, 70, 90],
+            )
+        );
+    }
 }
