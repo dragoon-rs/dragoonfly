@@ -4,7 +4,7 @@ use reed_solomon_erasure::{Error, Field, ReedSolomonNonSystematic};
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Shard {
     pub k: u32,
-    pub i: u32,
+    pub linear_combination: Vec<(u32, u32)>,
     pub hash: Vec<u8>,
     pub bytes: Vec<u8>,
     pub size: usize,
@@ -12,7 +12,13 @@ pub struct Shard {
 
 pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     let k = blocks[0].k;
-    let n = blocks.iter().map(|b| b.i).max().unwrap_or(0) + 1;
+    let n = blocks
+        .iter()
+        // FIXME: this is incorrect
+        .map(|b| b.linear_combination[0].0)
+        .max()
+        .unwrap_or(0)
+        + 1;
 
     if blocks.len() < k as usize {
         return Err(Error::TooFewShards);
@@ -21,7 +27,8 @@ pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     let mut shards: Vec<Option<Vec<F::Elem>>> = Vec::with_capacity(n as usize);
     shards.resize(n as usize, None);
     for block in &blocks {
-        shards[block.i as usize] = Some(F::deserialize(&block.bytes));
+        // FIXME: this is incorrect
+        shards[block.linear_combination[0].0 as usize] = Some(F::deserialize(&block.bytes));
     }
 
     ReedSolomonNonSystematic::<F>::vandermonde(k as usize, n as usize)?.reconstruct(&mut shards)?;
@@ -89,7 +96,7 @@ mod tests {
                 }
                 blocks.push(Shard {
                     k: K as u32,
-                    i: i as u32,
+                    linear_combination: vec![(i as u32, 1)],
                     hash: hash.clone(),
                     bytes: shard,
                     size: DATA.len(),

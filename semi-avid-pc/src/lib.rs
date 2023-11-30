@@ -70,7 +70,7 @@ where
         proofs.push(Block {
             shard: fec::Shard {
                 k: k as u32,
-                i: i as u32,
+                linear_combination: vec![(i as u32, 1)],
                 hash: hash.to_vec(),
                 bytes: shard,
                 size: nb_bytes,
@@ -149,8 +149,6 @@ where
     P: DenseUVPolynomial<E::ScalarField, Point = E::ScalarField>,
     for<'a, 'b> &'a P: Div<&'b P, Output = P>,
 {
-    let alpha = E::ScalarField::from_le_bytes_mod_order(&[block.shard.i as u8]);
-
     let mut elements = Vec::new();
     for chunk in block
         .shard
@@ -162,16 +160,26 @@ where
     let polynomial = P::from_coefficients_vec(elements);
     let (commit, _) = KZG10::<E, P>::commit(verifier_key, &polynomial, None, None)?;
 
-    Ok(Into::<E::G1>::into(commit.0)
-        == block
-            .commit
-            .iter()
-            .enumerate()
-            .map(|(j, c)| {
-                let commit: E::G1 = c.0.into();
-                commit.mul(alpha.pow([j as u64]))
-            })
-            .sum())
+    let rhs = block
+        .shard
+        .linear_combination
+        .iter()
+        .map(|&(i, w)| {
+            let alpha = E::ScalarField::from_le_bytes_mod_order(&[i as u8]);
+
+            let f: E::G1 = block
+                .commit
+                .iter()
+                .enumerate()
+                .map(|(j, c)| {
+                    let commit: E::G1 = c.0.into();
+                    commit.mul(alpha.pow([j as u64]))
+                })
+                .sum();
+            f.mul(E::ScalarField::from_le_bytes_mod_order(&[w as u8]))
+        })
+        .sum();
+    Ok(Into::<E::G1>::into(commit.0) == rhs)
 }
 
 pub fn batch_verify<E, P>(
