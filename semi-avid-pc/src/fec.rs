@@ -1,5 +1,11 @@
+use std::ops::Mul;
+
+use ark_ec::pairing::Pairing;
+use ark_ff::{BigInteger, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use reed_solomon_erasure::{Error, Field, ReedSolomonNonSystematic};
+use reed_solomon_erasure::{Error, Field as GF, ReedSolomonNonSystematic};
+
+use crate::field;
 
 #[derive(Debug, Default, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct LinearCombinationElement {
@@ -16,7 +22,54 @@ pub struct Shard {
     pub size: usize,
 }
 
-pub fn decode<F: Field>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
+impl Shard {
+    pub fn mul<E: Pairing>(&self, alpha: u32) -> Self {
+        let bytes = match alpha {
+            0 => vec![0u8; self.bytes.len()],
+            1 => self.bytes.to_vec(),
+            _ => {
+                let alpha = E::ScalarField::from_le_bytes_mod_order(&u32_to_u8_vec(alpha));
+
+                let elements = field::split_data_into_field_elements::<E>(&self.bytes, 1)
+                    .iter()
+                    .map(|e| e.mul(alpha))
+                    .collect::<Vec<_>>();
+                let mut shard = vec![];
+                for e in elements {
+                    shard.append(&mut e.into_bigint().to_bytes_le());
+                }
+
+                shard
+            }
+        };
+
+        Shard {
+            k: self.k,
+            linear_combination: self
+                .linear_combination
+                .iter()
+                .map(|l| LinearCombinationElement {
+                    index: l.index,
+                    weight: l.weight * alpha,
+                })
+                .collect(),
+            hash: self.hash.clone(),
+            bytes,
+            size: self.size,
+        }
+    }
+}
+
+fn u32_to_u8_vec(num: u32) -> Vec<u8> {
+    vec![
+        (num & 0xFF) as u8,
+        ((num >> 8) & 0xFF) as u8,
+        ((num >> 16) & 0xFF) as u8,
+        ((num >> 24) & 0xFF) as u8,
+    ]
+}
+
+pub fn decode<F: GF>(blocks: Vec<Shard>) -> Result<Vec<u8>, Error> {
     let k = blocks[0].k;
     let n = blocks
         .iter()
@@ -54,7 +107,7 @@ mod tests {
     use rs_merkle::algorithms::Sha256;
     use rs_merkle::Hasher;
 
-    use crate::fec::{decode, LinearCombinationElement, Shard};
+    use crate::fec::{decode, u32_to_u8_vec, LinearCombinationElement, Shard};
 
     const DATA: &[u8] = b"f\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0o\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0r\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0b\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0z\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
@@ -114,5 +167,14 @@ mod tests {
         }
 
         assert_eq!(DATA, decode::<GF>(blocks).unwrap())
+    }
+
+    #[test]
+    fn u32_to_u8_conversion() {
+        assert_eq!(u32_to_u8_vec(0u32), vec![0u8, 0u8, 0u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(1u32), vec![1u8, 0u8, 0u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(256u32), vec![0u8, 1u8, 0u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(65536u32), vec![0u8, 0u8, 1u8, 0u8]);
+        assert_eq!(u32_to_u8_vec(16777216u32), vec![0u8, 0u8, 0u8, 1u8]);
     }
 }
