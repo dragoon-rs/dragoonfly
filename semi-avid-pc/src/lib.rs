@@ -377,6 +377,20 @@ mod tests {
         };
         assert!(verify::<E, P>(&block, &powers)?);
 
+        let block = Block {
+            shard: blocks[3].shard.combine::<E>(2, &blocks[2].shard, 5),
+            commit: blocks[3].commit.clone(),
+            m: blocks[3].m,
+        };
+        assert!(verify::<E, P>(&block, &powers)?);
+
+        let block = Block {
+            shard: block.shard.combine::<E>(3, &blocks[5].shard, 4),
+            commit: block.commit.clone(),
+            m: block.m,
+        };
+        assert!(verify::<E, P>(&block, &powers)?);
+
         Ok(())
     }
 
