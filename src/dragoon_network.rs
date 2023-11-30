@@ -147,14 +147,14 @@ impl DragoonNetwork {
     async fn handle_query_result(&mut self, result: QueryResult, id: QueryId) {
         match result {
             kad::QueryResult::StartProviding(Ok(result_ok)) => {
+                info!("Started providing {:?}", result_ok);
                 if let Some(sender) = self.pending_start_providing.remove(&id) {
-                    info!("Started providing {:?}", result_ok);
                     debug!("Sending empty response");
                     if sender.send(Ok(())).is_err() {
                         error!("Could not send result");
                     }
                 } else {
-                    error!("Could not find id = {} in the start providers", id);
+                    warn!("Could not find id = {} in the start providers", id);
                 }
             }
             kad::QueryResult::GetProviders(get_providers_result) => {
@@ -244,7 +244,7 @@ impl DragoonNetwork {
             kad::QueryResult::PutRecord(Err(err)) => {
                 error!("Failed to put record: {err:?}");
             }
-            _ => {}
+            e => warn!("[unknown event] {:?}", e),
         }
     }
 
@@ -348,17 +348,19 @@ impl DragoonNetwork {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
                 self.handle_request_response(request_response).await;
             }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::Dragoon(event)) => {
-                match event {
-                    Event::Sent { peer } => {
-                        info!("Sent a shard to peer {peer}");
-                    }
-                    Event::Received { shard } => {
-                        info!("Received a shard : {shard:?}");
-                    }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::Dragoon(event)) => match event {
+                Event::Sent { peer } => {
+                    info!("Sent a shard to peer {peer}");
                 }
-
-            }
+                Event::Received { shard } => {
+                    info!("Received a shard : {shard:?}");
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .start_providing(shard.hash.into())
+                        .unwrap();
+                }
+            },
             e => warn!("[unknown event] {:?}", e),
         }
     }

@@ -25,7 +25,7 @@ pub(crate) enum InEvent {
 #[derive(Debug)]
 pub enum Event {
     Sent { peer: PeerId },
-    Received { shard: Shard}
+    Received { shard: Shard },
 }
 
 #[derive(Debug)]
@@ -155,7 +155,9 @@ impl ConnectionHandler for Handler {
             self.network_send_task.remove(id);
         }
         if let Some(peer) = shard_sent {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Sent { peer }));
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Sent {
+                peer,
+            }));
         }
 
         to_remove.clear();
@@ -178,7 +180,9 @@ impl ConnectionHandler for Handler {
         }
 
         if let Some(s) = shard_received {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Received { shard:s }));
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Received {
+                shard: s,
+            }));
         }
         return Poll::Pending;
     }
@@ -233,24 +237,19 @@ impl ConnectionHandler for Handler {
     }
 }
 
-
 pub(crate) struct Behaviour {
-    protocol_version: String,
     connected_peers: HashSet<PeerId>,
     listen_addresses: ListenAddresses,
     connections: HashMap<ConnectionId, PeerId>,
-    handlers: HashMap<PeerId, Handler>,
     events: VecDeque<ToSwarm<Event, InEvent>>,
 }
 
 impl Behaviour {
     pub(crate) fn new(protocol_version: String) -> Self {
         Self {
-            protocol_version,
             connected_peers: HashSet::new(),
             listen_addresses: Default::default(),
             connections: HashMap::new(),
-            handlers: HashMap::new(),
             events: Default::default(),
         }
     }
@@ -388,16 +387,15 @@ impl NetworkBehaviour for Behaviour {
         match event {
             Event::Sent { peer } => {
                 self.events.push_front(ToSwarm::GenerateEvent {
-                    0: Event::Sent { peer},
+                    0: Event::Sent { peer },
                 });
             }
             Event::Received { shard } => {
                 self.events.push_front(ToSwarm::GenerateEvent {
-                    0: Event::Received {  shard },
+                    0: Event::Received { shard },
                 });
             }
         }
-
     }
 
     #[tracing::instrument(level = "trace", name = "NetworkBehaviour::poll", skip(self))]
@@ -459,9 +457,9 @@ where
 
 #[derive(Debug)]
 pub struct Shard {
-    hash: Vec<u8>,
-    shard: Vec<u8>,
-    commit: Vec<u8>,
+    pub hash: Vec<u8>,
+    pub shard: Vec<u8>,
+    pub commit: Vec<u8>,
 }
 
 pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<Shard>
@@ -477,9 +475,9 @@ where
     stream.write_all(&response).await?;
     stream.flush().await?;
     let shard = Shard {
-        hash: vec![1,2,3,4],
-        shard: vec![5,6,7,8,9],
-        commit: vec![0,1,]
+        hash: vec![1, 2, 3, 4],
+        shard: vec![5, 6, 7, 8, 9],
+        commit: vec![0, 1],
     };
     Ok(shard)
 }
