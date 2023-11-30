@@ -40,8 +40,8 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route("/put-record/:key/:value", get(commands::put_record))
         .route("/get-record/:key", get(commands::get_record))
         .route("/dragoon/peers", get(commands::dragoon_peers))
-        .route("/dragoon/send/:peer/:data", get(commands::dragoon_send));
-
+        .route("/dragoon/send/:peer/:data", get(commands::dragoon_send))
+        .route("/dragoon/get/:peer/:key", get(commands::dragoon_get));
     #[cfg(feature = "file-sharing")]
     let router = router
         .route("/get-file/:key", get(commands::get_file))

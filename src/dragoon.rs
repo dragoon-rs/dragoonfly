@@ -23,7 +23,7 @@ pub(crate) enum InEvent {
 }
 
 #[derive(Debug)]
-pub enum Event {
+pub enum DragoonEvent {
     Sent { peer: PeerId },
     Received { shard: Shard },
 }
@@ -68,7 +68,7 @@ type DragoonRecvFuture = BoxFuture<'static, Result<Shard, io::Error>>;
 
 pub(crate) struct Handler {
     remote_peer_id: PeerId,
-    events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), Event>>,
+    events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), DragoonEvent>>,
     network_send_task: Vec<DragoonSendFuture>,
     network_recv_task: Vec<DragoonRecvFuture>,
     data_to_send: VecDeque<Vec<u8>>,
@@ -116,7 +116,7 @@ impl Handler {
 
 impl ConnectionHandler for Handler {
     type FromBehaviour = InEvent;
-    type ToBehaviour = Event;
+    type ToBehaviour = DragoonEvent;
     type InboundProtocol = ReadyUpgrade<StreamProtocol>;
     type OutboundProtocol = ReadyUpgrade<StreamProtocol>;
     type InboundOpenInfo = ();
@@ -155,7 +155,7 @@ impl ConnectionHandler for Handler {
             self.network_send_task.remove(id);
         }
         if let Some(peer) = shard_sent {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Sent {
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(DragoonEvent::Sent {
                 peer,
             }));
         }
@@ -180,7 +180,7 @@ impl ConnectionHandler for Handler {
         }
 
         if let Some(s) = shard_received {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Received {
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(DragoonEvent::Received {
                 shard: s,
             }));
         }
@@ -241,7 +241,7 @@ pub(crate) struct Behaviour {
     connected_peers: HashSet<PeerId>,
     listen_addresses: ListenAddresses,
     connections: HashMap<ConnectionId, PeerId>,
-    events: VecDeque<ToSwarm<Event, InEvent>>,
+    events: VecDeque<ToSwarm<DragoonEvent, InEvent>>,
 }
 
 impl Behaviour {
@@ -338,7 +338,7 @@ impl Behaviour {
 
 impl NetworkBehaviour for Behaviour {
     type ConnectionHandler = Handler;
-    type ToSwarm = Event;
+    type ToSwarm = DragoonEvent;
 
     fn handle_established_inbound_connection(
         &mut self,
@@ -385,14 +385,14 @@ impl NetworkBehaviour for Behaviour {
     ) {
         println!("Behaviour::on_connection_handler_event, push Event {event:?}");
         match event {
-            Event::Sent { peer } => {
+            DragoonEvent::Sent { peer } => {
                 self.events.push_front(ToSwarm::GenerateEvent {
-                    0: Event::Sent { peer },
+                    0: DragoonEvent::Sent { peer },
                 });
             }
-            Event::Received { shard } => {
+            DragoonEvent::Received { shard } => {
                 self.events.push_front(ToSwarm::GenerateEvent {
-                    0: Event::Received { shard },
+                    0: DragoonEvent::Received { shard },
                 });
             }
         }

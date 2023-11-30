@@ -4,7 +4,7 @@ use futures::prelude::*;
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::kad::{QueryId, QueryResult};
-#[cfg(feature = "file-sharing")]
+//#[cfg(feature = "file-sharing")]
 use libp2p::request_response::{Event, Message, OutboundRequestId, ResponseChannel};
 use libp2p::{
     core::Multiaddr,
@@ -28,7 +28,7 @@ use crate::error::DragoonError::{
     BadListener, BootstrapError, DialError, PeerNotFound, ProviderError,
 };
 
-use crate::dragoon::Event;
+use crate::dragoon::DragoonEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRequest(String);
@@ -102,7 +102,7 @@ pub(crate) struct DragoonNetwork {
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_get_providers:
         HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
-    #[cfg(feature = "file-sharing")]
+    //#[cfg(feature = "file-sharing")]
     pending_request_file:
         HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
     pending_put_record: HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
@@ -124,7 +124,7 @@ impl DragoonNetwork {
             listeners: HashMap::new(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
-            #[cfg(feature = "file-sharing")]
+            //#[cfg(feature = "file-sharing")]
             pending_request_file: Default::default(),
             pending_put_record: Default::default(),
             pending_get_record: Default::default(),
@@ -251,10 +251,10 @@ impl DragoonNetwork {
     #[cfg(feature = "file-sharing")]
     async fn handle_request_response(
         &mut self,
-        request_response: Event<FileRequest, FileResponse>,
+        request_response: DragoonEvent<FileRequest, FileResponse>,
     ) {
         match request_response {
-            Event::Message { message, .. } => match message {
+            DragoonEvent::Message { message, .. } => match message {
                 Message::Request {
                     request, channel, ..
                 } => {
@@ -285,7 +285,7 @@ impl DragoonNetwork {
                     }
                 }
             },
-            Event::OutboundFailure {
+            DragoonEvent::OutboundFailure {
                 request_id, error, ..
             } => {
                 debug!("Request {} failed with {}", request_id, error);
@@ -349,10 +349,10 @@ impl DragoonNetwork {
                 self.handle_request_response(request_response).await;
             }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Dragoon(event)) => match event {
-                Event::Sent { peer } => {
+                DragoonEvent::Sent { peer } => {
                     info!("Sent a shard to peer {peer}");
                 }
-                Event::Received { shard } => {
+                DragoonEvent::Received { shard } => {
                     info!("Received a shard : {shard:?}");
                     self.swarm
                         .behaviour_mut()
@@ -360,7 +360,27 @@ impl DragoonNetwork {
                         .start_providing(shard.hash.into())
                         .unwrap();
                 }
-            },
+            }
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(Event::Message{peer, message})) => match message {
+                Message::Request {
+                    request, channel, ..
+                } => {
+                    if request.0 == "toto" {
+                        self.swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_response(channel, FileResponse(vec![1,2,3,4]));
+                    }
+                }
+                request_response::Message::Response {
+                    request_id,
+                    response,
+                } => {
+                    if self.pending_request_file.contains_key(&request_id) {
+                        info!("response: {:?}",response.0);
+                    }
+                }
+            }
             e => warn!("[unknown event] {:?}", e),
         }
     }
@@ -664,7 +684,22 @@ impl DragoonNetwork {
                         error!("Cannot send result");
                     }
                 }
-            },
+            }
+            DragoonCommand::DragoonGet {
+                peerid,
+                key,
+                sender
+            } => match PeerId::from_str(peerid.as_str()) {
+                Ok(peer) => {
+                    let request_id = self.swarm.behaviour_mut().request_response.send_request(&peer, FileRequest(key));
+                    self.pending_request_file.insert(request_id, sender);
+                }
+                Err(err) => {
+                    if sender.send(Err(Box::new(err))).is_err() {
+                        error!("Cannot send result");
+                    }
+                }
+            }
         }
     }
 }
