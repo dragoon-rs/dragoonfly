@@ -15,7 +15,8 @@ export def "swarm create" [n: int]: nothing -> table {
 # run a swarm
 export def "swarm run" [
     swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to run
-    --features: list<string> = [] # features to include in the nodes
+    --features: list<string> = [], # features to include in the nodes
+    --no-shell
 ]: nothing -> nothing {
     if ($swarm | is-empty) {
         error make --unspanned {
@@ -38,7 +39,9 @@ export def "swarm run" [
           + $"1> ($log_dir)/($node.seed).log 2> /dev/null &"
         )
     }
-    ^$nu.current-exe --execute $'
+
+    if not $no_shell {
+        ^$nu.current-exe --execute $'
        $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
        $env.NU_LOG_LEVEL = "DEBUG"
        $env.SWARM_LOG_DIR = ($log_dir)
@@ -46,6 +49,7 @@ export def "swarm run" [
        use swarm.nu ["swarm kill", "swarm list", "swarm log", "bytes decode"]
        const SWARM = ($swarm | to nuon)
     '
+    }
 
     null
 }
@@ -89,13 +93,14 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
 }
 
 # kill the swarm
-export def "swarm kill" []: nothing -> nothing {
+export def "swarm kill" [--no-shell]: nothing -> nothing {
     ps | where name =~ $NAME | each {|it|
         log warning $"killing ($it.pid)"
         kill $it.pid
     }
-
-    exit
+    if not $no_shell {
+        exit
+    }
 }
 
 # decode a list of integer bytes into the underlying encoded string

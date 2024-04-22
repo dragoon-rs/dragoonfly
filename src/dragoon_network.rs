@@ -360,8 +360,11 @@ impl DragoonNetwork {
                         .start_providing(shard.hash.into())
                         .unwrap();
                 }
-            }
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(Event::Message{peer, message})) => match message {
+            },
+            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(Event::Message {
+                peer,
+                message,
+            })) => match message {
                 Message::Request {
                     request, channel, ..
                 } => {
@@ -369,14 +372,14 @@ impl DragoonNetwork {
                         self.swarm
                             .behaviour_mut()
                             .request_response
-                            .send_response(channel, FileResponse(Some(vec![1,2,3,4])));
-                            return;
+                            .send_response(channel, FileResponse(Some(vec![1, 2, 3, 4])));
+                        return;
                     }
                     if request.0 == "tata" {
                         self.swarm
                             .behaviour_mut()
                             .request_response
-                            .send_response(channel, FileResponse(Some(vec![4,3,2,1])));
+                            .send_response(channel, FileResponse(Some(vec![4, 3, 2, 1])));
                         return;
                     }
                     self.swarm
@@ -389,7 +392,7 @@ impl DragoonNetwork {
                     response,
                 } => {
                     if self.pending_request_file.contains_key(&request_id) {
-                        info!("response: {:?}",response.0);
+                        info!("response: {:?}", response.0);
                         if let Some(sender) = self.pending_request_file.remove(&request_id) {
                             if let Some(res) = response.0 {
                                 if sender.send(Ok(res)).is_err() {
@@ -406,10 +409,9 @@ impl DragoonNetwork {
                         } else {
                             error!("could not find {} in the request files", request_id);
                         }
-
                     }
                 }
-            }
+            },
             e => warn!("[unknown event] {:?}", e),
         }
     }
@@ -713,14 +715,18 @@ impl DragoonNetwork {
                         error!("Cannot send result");
                     }
                 }
-            }
+            },
             DragoonCommand::DragoonGet {
                 peerid,
                 key,
-                sender
+                sender,
             } => match PeerId::from_str(peerid.as_str()) {
                 Ok(peer) => {
-                    let request_id = self.swarm.behaviour_mut().request_response.send_request(&peer, FileRequest(key));
+                    let request_id = self
+                        .swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_request(&peer, FileRequest(key));
                     self.pending_request_file.insert(request_id, sender);
                 }
                 Err(err) => {
@@ -728,7 +734,7 @@ impl DragoonNetwork {
                         error!("Cannot send result");
                     }
                 }
-            }
+            },
         }
     }
 }
