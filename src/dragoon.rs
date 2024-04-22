@@ -155,9 +155,9 @@ impl ConnectionHandler for Handler {
             self.network_send_task.remove(id);
         }
         if let Some(peer) = shard_sent {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(DragoonEvent::Sent {
-                peer,
-            }));
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                DragoonEvent::Sent { peer },
+            ));
         }
 
         to_remove.clear();
@@ -180,9 +180,9 @@ impl ConnectionHandler for Handler {
         }
 
         if let Some(s) = shard_received {
-            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(DragoonEvent::Received {
-                shard: s,
-            }));
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                DragoonEvent::Received { shard: s },
+            ));
         }
         return Poll::Pending;
     }

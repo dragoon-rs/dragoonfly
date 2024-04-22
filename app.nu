@@ -7,19 +7,19 @@ const HTTP = {
 
 const DEFAULT_IP = "127.0.0.1:3000"
 
-def "http get-curl" [url: string, --allow-errors, --full]: nothing -> record<body: string, status: int> {
-    $url
-        | str replace --all ' ' "%20"
-        | curl -i $in
-        | lines
-        | split list ""
-        | update 0 { get 0 | parse "HTTP/{v} {c} {m}" | into record }
-        | update 1 { get 0 }
-        | {
-            body: ($in.1 | str replace --regex '^"' '' | str replace --regex '"$' '' | from json),
-            status: ($in.0.c | into int),
-        }
-}
+# def "http get-curl" [url: string, --allow-errors, --full]: nothing -> record<body: string, status: int> {
+#     $url
+#         | str replace --all ' ' "%20"
+#         | curl -i $in
+#         | lines
+#         | split list ""
+#         | update 0 { get 0 | parse "HTTP/{v} {c} {m}" | into record }
+#         | update 1 { get 0 }
+#         | {
+#             body: ($in.1 | str replace --regex '^"' '' | str replace --regex '"$' '' | from json),
+#             status: ($in.0.c | into int),
+#         }
+# }
 
 def run-command [node: string]: string -> any {
     let command = $in
@@ -31,7 +31,8 @@ def run-command [node: string]: string -> any {
         | insert scheme "http"
         | insert path $command
         | url join
-        | http get-curl $in --allow-errors --full
+        | http get $in --allow-errors --full
+        #| http get-curl $in --allow-errors --full
 
     if $res.status == $HTTP.NOT_FOUND {
         error make --unspanned {
