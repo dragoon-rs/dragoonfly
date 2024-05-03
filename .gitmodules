@@ -1,0 +1,3 @@
+[submodule "komodo"]
+	path = komodo
+	url = git@gitlab.isae-supaero.fr:dragoon/komodo.git

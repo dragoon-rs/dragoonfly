@@ -5,26 +5,27 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
-#[cfg(feature = "file-sharing")]
-use futures::StreamExt;
-#[cfg(feature = "file-sharing")]
-use libp2p::request_response::ResponseChannel;
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::HashSet;
 use std::error::Error;
 use std::sync::Arc;
-#[cfg(feature = "file-sharing")]
-use tracing::debug;
 use tracing::{error, info};
 
 use crate::app::AppState;
-#[cfg(feature = "file-sharing")]
-use crate::dragoon_network::{DragoonEvent, FileResponse};
 use crate::error::DragoonError;
-
 use crate::to_serialize::{ConvertSer, JsonWrapper};
+
+// use komodo::linalg::Matrix;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(crate) enum EncodingMethod {
+    Vandermonde,
+    Random,
+}
+//TODO impl Display to convert from String for axum when doing http-get requests ?
 
 // Potential other commands:
 // - dial
@@ -41,19 +42,20 @@ use crate::to_serialize::{ConvertSer, JsonWrapper};
 //
 // - behaviour
 
-type Sender<T> = oneshot::Sender<Result<T, Box<dyn Error + Send>>>;
+pub(crate) type Sender<T> = oneshot::Sender<Result<T, Box<dyn Error + Send>>>;
 #[derive(Debug)]
 pub(crate) enum DragoonCommand {
-    #[cfg(feature = "file-sharing")]
-    AddFile {
-        file: Vec<u8>,
-        channel: ResponseChannel<FileResponse>,
-    },
     AddPeer {
         multiaddr: String,
         sender: Sender<()>,
     },
     Bootstrap {
+        sender: Sender<()>,
+    },
+    DecodeBlocks {
+        block_dir: String,
+        block_hashes: Vec<String>,
+        output_filename: String,
         sender: Sender<()>,
     },
     Dial {
@@ -69,18 +71,22 @@ pub(crate) enum DragoonCommand {
         sender: Sender<HashSet<PeerId>>,
     },
     DragoonSend {
-        data: String,
+        block_hash: String,
+        block_path: String,
         peerid: String,
         sender: Sender<()>,
     },
+    EncodeFile {
+        file_path: String,
+        replace_blocks: bool,
+        encoding_method: EncodingMethod,
+        encode_mat_k: usize,
+        encode_mat_n: usize,
+        powers_path: String,
+        sender: Sender<String>,
+    },
     GetConnectedPeers {
         sender: Sender<Vec<PeerId>>,
-    },
-    #[cfg(feature = "file-sharing")]
-    GetFile {
-        key: String,
-        peer: PeerId,
-        sender: Sender<Vec<u8>>,
     },
     GetListeners {
         sender: Sender<Vec<Multiaddr>>,
@@ -104,8 +110,8 @@ pub(crate) enum DragoonCommand {
         sender: Sender<u64>,
     },
     PutRecord {
-        key: String,
-        value: Vec<u8>,
+        block_hash: String,
+        block_dir: String,
         sender: Sender<()>,
     },
     RemoveListener {
@@ -121,17 +127,15 @@ pub(crate) enum DragoonCommand {
 impl std::fmt::Display for DragoonCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            #[cfg(feature = "file-sharing")]
-            DragoonCommand::AddFile { .. } => write!(f, "add-file"),
             DragoonCommand::AddPeer { .. } => write!(f, "add-peer"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
+            DragoonCommand::DecodeBlocks { .. } => write!(f, "decode-blocks"),
             DragoonCommand::Dial { .. } => write!(f, "dial"),
             DragoonCommand::DragoonGet { .. } => write!(f, "dragoon-get"),
             DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
             DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
+            DragoonCommand::EncodeFile { .. } => write!(f, "encode-file"),
             DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
-            #[cfg(feature = "file-sharing")]
-            DragoonCommand::GetFile { .. } => write!(f, "get-file"),
             DragoonCommand::GetListeners { .. } => write!(f, "get-listener"),
             DragoonCommand::GetPeerId { .. } => write!(f, "get-peer-id"),
             DragoonCommand::GetNetworkInfo { .. } => write!(f, "get-network-info"),
@@ -194,36 +198,7 @@ macro_rules! dragoon_command {
 // dragoon_command(state, DragoonCommand::Something, peerid, data)
 // Implementation of dragoon commands
 
-#[cfg(feature = "file-sharing")]
-pub(crate) async fn add_file(
-    Path((key, content)): Path<(String, String)>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    info!(
-        "running command `add_file`: key = {}, content = {}",
-        key, content
-    );
-    let mut event_receiver = state.event_receiver.lock().await;
-
-    loop {
-        match event_receiver.next().await {
-            Some(DragoonEvent::InboundRequest { channel, request }) => {
-                debug!("add_file: request '{}'", request);
-                if request == key {
-                    debug!("add_file: request accepted");
-                    let cmd = DragoonCommand::AddFile {
-                        file: content.as_bytes().to_vec(),
-                        channel,
-                    };
-                    send_command(cmd, state.clone()).await;
-                }
-            }
-            e => todo!("{:?}", e),
-        }
-    }
-}
-
-pub(crate) async fn add_peer(
+pub(crate) async fn create_cmd_add_peer(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -231,12 +206,29 @@ pub(crate) async fn add_peer(
     dragoon_command!(state, AddPeer, multiaddr)
 }
 
-pub(crate) async fn bootstrap(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn create_cmd_bootstrap(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `bootstrap`");
     dragoon_command!(state, Bootstrap)
 }
 
-pub(crate) async fn dial(
+pub(crate) async fn create_cmd_decode_blocks(
+    Path((block_dir, block_hashes_json, output_filename)): Path<(String, String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `decode_blocks");
+    let block_hashes = serde_json::from_str(&block_hashes_json).expect(
+        "Could not parse user input as a valid list of block hashes when trying to decode blocks",
+    );
+    dragoon_command!(
+        state,
+        DecodeBlocks,
+        block_dir,
+        block_hashes,
+        output_filename
+    )
+}
+
+pub(crate) async fn create_cmd_dial(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -244,7 +236,7 @@ pub(crate) async fn dial(
     dragoon_command!(state, Dial, multiaddr)
 }
 
-pub(crate) async fn dragoon_get(
+pub(crate) async fn create_cmd_dragoon_get(
     Path((peerid, key)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -252,76 +244,52 @@ pub(crate) async fn dragoon_get(
     dragoon_command!(state, DragoonGet, peerid, key)
 }
 
-pub(crate) async fn dragoon_peers(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn create_cmd_dragoon_peers(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `dragoon_peers`");
     dragoon_command!(state, DragoonPeers)
 }
 
-pub(crate) async fn dragoon_send(
-    Path((peerid, data)): Path<(String, String)>,
+pub(crate) async fn create_cmd_dragoon_send(
+    Path((peerid, block_hash, block_path)): Path<(String, String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command `dragoon_send`");
-    dragoon_command!(state, DragoonSend, data, peerid)
+    dragoon_command!(state, DragoonSend, block_hash, block_path, peerid)
 }
 
-pub(crate) async fn get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn create_cmd_encode_file(
+    Path((file_path, replace_blocks, encoding_method, encode_mat_k, encode_mat_n, powers_path)): Path<(String, bool, EncodingMethod, usize, usize, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `encode_file`");
+    dragoon_command!(
+        state,
+        EncodeFile,
+        file_path,
+        replace_blocks,
+        encoding_method,
+        encode_mat_k,
+        encode_mat_n,
+        powers_path
+    )
+}
+
+pub(crate) async fn create_cmd_get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `get_connected_peers`");
     dragoon_command!(state, GetConnectedPeers)
 }
 
-#[cfg(feature = "file-sharing")]
-pub(crate) async fn get_file(
-    Path(key): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    info!("running command `get_file`");
-    let providers = {
-        let (sender, receiver) = oneshot::channel();
-
-        let cmd = DragoonCommand::GetProviders {
-            key: key.clone(),
-            sender,
-        };
-        let cmd_name = cmd.to_string();
-        send_command(cmd, state.clone()).await;
-
-        match receiver.await {
-            Err(e) => return handle_canceled(e, &cmd_name),
-            Ok(res) => match res {
-                Err(e) => return handle_dragoon_error(e, &cmd_name),
-                Ok(providers) => providers,
-            },
-        }
-    };
-
-    let (sender, receiver) = oneshot::channel();
-
-    let cmd = DragoonCommand::GetFile {
-        key: key.clone(),
-        // FIXME: should use all the providers here instead of just the first one,
-        // run the requests on all of them and then "future select" the first one to complete
-        // successfully.
-        peer: *providers.into_iter().collect::<Vec<_>>().get(0).unwrap(),
-        sender,
-    };
-    let cmd_name = cmd.to_string();
-    send_command(cmd, state).await;
-
-    command_res_match(receiver, cmd_name).await
-}
-
-pub(crate) async fn get_listeners(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn create_cmd_get_listeners(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `get_listeners`");
     dragoon_command!(state, GetListeners)
 }
 
-pub(crate) async fn get_peer_id(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn create_cmd_get_peer_id(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `get_peer_id`");
     dragoon_command!(state, GetPeerId)
 }
 
-pub(crate) async fn get_providers(
+pub(crate) async fn create_cmd_get_providers(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -358,12 +326,12 @@ impl SerNetworkInfo {
     }
 }
 
-pub(crate) async fn get_network_info(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn create_cmd_get_network_info(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `get_network_info`");
     dragoon_command!(state, GetNetworkInfo)
 }
 
-pub(crate) async fn get_record(
+pub(crate) async fn create_cmd_get_record(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -371,7 +339,7 @@ pub(crate) async fn get_record(
     dragoon_command!(state, GetRecord, key)
 }
 
-pub(crate) async fn listen(
+pub(crate) async fn create_cmd_listen(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -379,16 +347,15 @@ pub(crate) async fn listen(
     dragoon_command!(state, Listen, multiaddr)
 }
 
-pub(crate) async fn put_record(
-    Path((key, value)): Path<(String, String)>,
+pub(crate) async fn create_cmd_put_record(
+    Path((block_hash, block_dir)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command `put_record`");
-    let value = value.as_bytes().to_vec();
-    dragoon_command!(state, PutRecord, key, value)
+    dragoon_command!(state, PutRecord, block_hash, block_dir)
 }
 
-pub(crate) async fn remove_listener(
+pub(crate) async fn create_cmd_remove_listener(
     Path(listener_id): Path<u64>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -396,7 +363,7 @@ pub(crate) async fn remove_listener(
     dragoon_command!(state, RemoveListener, listener_id)
 }
 
-pub(crate) async fn start_provide(
+pub(crate) async fn create_cmd_start_provide(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -407,13 +374,7 @@ pub(crate) async fn start_provide(
 // End of dragoon command implementation
 
 fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {
-    if let Ok(dragoon_error) = err.downcast::<DragoonError>() {
-        dragoon_error.into_response()
-    } else {
-        error!("Could not get return message from command `{}`", command);
-        DragoonError::UnexpectedError(format!("could not convert error for {}", command))
-            .into_response()
-    }
+    format!("Got error from command `{}`: {}", command, err.to_string()).into_response()
 }
 
 fn handle_canceled(err: Canceled, command: &str) -> Response {

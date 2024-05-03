@@ -17,6 +17,8 @@ pub enum DragoonError {
     BootstrapError(String),
     #[error("Peer not connected")]
     PeerNotFound,
+    #[error("The parent directory of the block directory (block_dir: {0}) either doesn't exist, or permissions are insufficient to write")]
+    NoParentDirectory(String),
 }
 
 impl IntoResponse for DragoonError {
@@ -39,6 +41,9 @@ impl IntoResponse for DragoonError {
                 (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
             }
             DragoonError::PeerNotFound => (StatusCode::BAD_REQUEST, self.to_string()),
+            DragoonError::NoParentDirectory(ref msg) => {
+                (StatusCode::BAD_REQUEST, format!("{}: {}", self, msg))
+            }
         };
         (status, Json(format!("{}", err_msg))).into_response()
     }
