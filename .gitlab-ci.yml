@@ -40,6 +40,8 @@ test:
     - tar xvf /tmp/nu.tar.gz --directory /tmp
     - cp "/tmp/$NUSHELL_BUILD/nu" /tmp/nu
 
+    - git submodule set-url -- komodo "https://gitlab-ci-token:${KOMODO_TOKEN}@gitlab.isae-supaero.fr/dragoon/komodo"
+    - make init
     - make show
 
   script:

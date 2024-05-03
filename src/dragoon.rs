@@ -17,29 +17,41 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use std::{fmt, io};
 
+use ark_ec::CurveGroup;
+use ark_ff::PrimeField;
+use ark_serialize::{CanonicalSerialize, Compress, Validate};
+use komodo::{fs, Block};
+
+use anyhow::Result;
+
+use std::path::Path;
+use tracing::info;
+
 #[derive(Debug)]
 pub(crate) enum InEvent {
-    Send(Vec<u8>),
+    Send((String, String)), // the hash of the block
 }
 
 #[derive(Debug)]
-pub enum DragoonEvent {
+pub enum DragoonEvent<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     Sent { peer: PeerId },
-    Received { shard: Shard },
+    Received { block: Block<F, G> },
 }
 
 #[derive(Debug)]
 pub(crate) enum Failure {
     Timeout,
     Unsupported,
-    Other {
-        error: Box<dyn std::error::Error + Send + 'static>,
-    },
+    Other { error: anyhow::Error },
 }
 
 impl Failure {
-    fn other(e: impl std::error::Error + Send + 'static) -> Self {
-        Self::Other { error: Box::new(e) }
+    fn other(e: anyhow::Error) -> Self {
+        Self::Other { error: e }
     }
 }
 
@@ -64,17 +76,25 @@ impl Error for Failure {
 }
 
 type DragoonSendFuture = BoxFuture<'static, Result<(Stream, Duration), Failure>>;
-type DragoonRecvFuture = BoxFuture<'static, Result<Shard, io::Error>>;
+type DragoonRecvFuture<F, G> = BoxFuture<'static, Result<Block<F, G>, io::Error>>;
 
-pub(crate) struct Handler {
+pub(crate) struct Handler<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     remote_peer_id: PeerId,
-    events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), DragoonEvent>>,
+    events: VecDeque<ConnectionHandlerEvent<ReadyUpgrade<StreamProtocol>, (), DragoonEvent<F, G>>>,
     network_send_task: Vec<DragoonSendFuture>,
-    network_recv_task: Vec<DragoonRecvFuture>,
-    data_to_send: VecDeque<Vec<u8>>,
+    network_recv_task: Vec<DragoonRecvFuture<F, G>>,
+    data_to_send: VecDeque<(String, String)>, // the hash of the data
 }
 
-impl Handler {
+impl<F, G> Handler<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     pub(crate) fn new(remote_peer_id: PeerId) -> Self {
         Self {
             remote_peer_id,
@@ -107,16 +127,24 @@ impl Handler {
             <Self as ConnectionHandler>::OutboundOpenInfo,
         >,
     ) {
-        if let Some(data) = self.data_to_send.pop_front() {
-            self.network_send_task
-                .push(Box::pin(dragoon_send(output, data, Duration::new(10, 0))));
+        if let Some((block_hash, block_dir)) = self.data_to_send.pop_front() {
+            self.network_send_task.push(Box::pin(dragoon_send::<F, G>(
+                output,
+                block_hash,
+                block_dir,
+                Duration::new(10, 0),
+            )));
         }
     }
 }
 
-impl ConnectionHandler for Handler {
+impl<F, G> ConnectionHandler for Handler<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     type FromBehaviour = InEvent;
-    type ToBehaviour = DragoonEvent;
+    type ToBehaviour = DragoonEvent<F, G>;
     type InboundProtocol = ReadyUpgrade<StreamProtocol>;
     type OutboundProtocol = ReadyUpgrade<StreamProtocol>;
     type InboundOpenInfo = ();
@@ -152,7 +180,8 @@ impl ConnectionHandler for Handler {
             }
         }
         for &id in to_remove.iter().rev() {
-            self.network_send_task.remove(id);
+            self.network_send_task.remove(id); // unused future in a sync function, but function can't be async
+                                               // should probably use something else
         }
         if let Some(peer) = shard_sent {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
@@ -176,12 +205,13 @@ impl ConnectionHandler for Handler {
             }
         }
         for &id in to_remove.iter().rev() {
-            self.network_recv_task.remove(id);
+            self.network_recv_task.remove(id); // unused future in a sync function, but function can't be async
+                                               // should probably use something else
         }
 
-        if let Some(s) = shard_received {
+        if let Some(b) = shard_received {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
-                DragoonEvent::Received { shard: s },
+                DragoonEvent::Received { block: b },
             ));
         }
         return Poll::Pending;
@@ -189,9 +219,9 @@ impl ConnectionHandler for Handler {
 
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
         match event {
-            InEvent::Send(data) => {
-                println!("send data for {}", self.remote_peer_id);
-                self.data_to_send.push_back(data);
+            InEvent::Send((data, data_path)) => {
+                info!("send data for {}", self.remote_peer_id);
+                self.data_to_send.push_back((data, data_path));
                 self.events
                     .push_back(ConnectionHandlerEvent::OutboundSubstreamRequest {
                         protocol: SubstreamProtocol::new(
@@ -237,15 +267,23 @@ impl ConnectionHandler for Handler {
     }
 }
 
-pub(crate) struct Behaviour {
+pub(crate) struct Behaviour<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     connected_peers: HashSet<PeerId>,
     listen_addresses: ListenAddresses,
     connections: HashMap<ConnectionId, PeerId>,
-    events: VecDeque<ToSwarm<DragoonEvent, InEvent>>,
+    events: VecDeque<ToSwarm<DragoonEvent<F, G>, InEvent>>,
 }
 
-impl Behaviour {
-    pub(crate) fn new(protocol_version: String) -> Self {
+impl<F, G> Behaviour<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
+    pub(crate) fn new() -> Self {
         Self {
             connected_peers: HashSet::new(),
             listen_addresses: Default::default(),
@@ -322,12 +360,17 @@ impl Behaviour {
         self.connected_peers.clone()
     }
 
-    pub(crate) fn send_data_to_peer(&mut self, data: String, peer: PeerId) -> bool {
+    pub(crate) fn send_data_to_peer(
+        &mut self,
+        block_hash: String,
+        block_path: String,
+        peer: PeerId,
+    ) -> bool {
         if self.connected_peers.contains(&peer) {
             self.events.push_back(ToSwarm::NotifyHandler {
                 peer_id: peer,
                 handler: NotifyHandler::Any,
-                event: InEvent::Send(data.into_bytes()),
+                event: InEvent::Send((block_hash, block_path)),
             });
             return true;
         } else {
@@ -336,9 +379,14 @@ impl Behaviour {
     }
 }
 
-impl NetworkBehaviour for Behaviour {
-    type ConnectionHandler = Handler;
-    type ToSwarm = DragoonEvent;
+impl<F, G> NetworkBehaviour for Behaviour<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
+    // ? should the type be generic
+    type ConnectionHandler = Handler<F, G>;
+    type ToSwarm = DragoonEvent<F, G>;
 
     fn handle_established_inbound_connection(
         &mut self,
@@ -379,8 +427,8 @@ impl NetworkBehaviour for Behaviour {
 
     fn on_connection_handler_event(
         &mut self,
-        peer: PeerId,
-        connection_id: ConnectionId,
+        _peer: PeerId,
+        _connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
         println!("Behaviour::on_connection_handler_event, push Event {event:?}");
@@ -390,9 +438,9 @@ impl NetworkBehaviour for Behaviour {
                     0: DragoonEvent::Sent { peer },
                 });
             }
-            DragoonEvent::Received { shard } => {
+            DragoonEvent::Received { block } => {
                 self.events.push_front(ToSwarm::GenerateEvent {
-                    0: DragoonEvent::Received { shard },
+                    0: DragoonEvent::Received { block },
                 });
             }
         }
@@ -409,14 +457,19 @@ impl NetworkBehaviour for Behaviour {
     }
 }
 
-async fn dragoon_send(
+async fn dragoon_send<F, G>(
     stream: Stream,
-    data: Vec<u8>,
+    block_hash: String,
+    block_dir: String,
     timeout: Duration,
-) -> Result<(Stream, Duration), Failure> {
+) -> Result<(Stream, Duration), Failure>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     println!("dragoon_send {stream:?}");
 
-    let req = dragoon_send_data(stream, data);
+    let req = dragoon_send_data::<_, F, G>(stream, block_hash, block_dir);
     futures::pin_mut!(req);
 
     match future::select(req, Delay::new(timeout)).await {
@@ -426,11 +479,28 @@ async fn dragoon_send(
     }
 }
 
-pub(crate) async fn dragoon_send_data<S>(mut stream: S, data: Vec<u8>) -> io::Result<(S, Duration)>
+pub(crate) async fn dragoon_send_data<S, F, G>(
+    mut stream: S,
+    block_hash: String,
+    block_dir: String,
+) -> Result<(S, Duration)>
 where
     S: AsyncRead + AsyncWrite + Unpin,
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
 {
-    stream.write_all(data.as_slice()).await?;
+    let block = match fs::read_blocks::<F, G>(
+        &[block_hash],
+        Path::new(&block_dir),
+        Compress::Yes,
+        Validate::Yes,
+    ) {
+        Ok(vec) => vec[0].clone().1,
+        Err(_) => panic!("Could not read block from disk"), // ? would it be better to return the error
+    };
+    let mut buf = vec![0; block.serialized_size(Compress::Yes)];
+    block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+    stream.write_all(&buf[..]).await?;
     stream.flush().await?;
     let mut recv_payload = [0u8; 4];
     stream.read_exact(&mut recv_payload).await?;
@@ -443,6 +513,7 @@ where
             io::ErrorKind::InvalidData,
             "Dragoon payload mismatch",
         ))
+        .map_err(anyhow::Error::from)
     }
 }
 
@@ -455,16 +526,11 @@ where
 //     Ok(stream)
 // }
 
-#[derive(Debug)]
-pub struct Shard {
-    pub hash: Vec<u8>,
-    pub shard: Vec<u8>,
-    pub commit: Vec<u8>,
-}
-
-pub(crate) async fn dragoon_receive_data<S>(mut stream: S) -> io::Result<Shard>
+pub(crate) async fn dragoon_receive_data<S, F, G>(mut stream: S) -> io::Result<Block<F, G>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
 {
     println!("start receive data");
     let mut payload = [0u8; 64];
@@ -474,10 +540,7 @@ where
     let response = [42, 42, 42, 42];
     stream.write_all(&response).await?;
     stream.flush().await?;
-    let shard = Shard {
-        hash: vec![1, 2, 3, 4],
-        shard: vec![5, 6, 7, 8, 9],
-        commit: vec![0, 1],
-    };
-    Ok(shard)
+
+    let block = Block::default();
+    Ok(block)
 }

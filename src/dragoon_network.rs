@@ -1,11 +1,12 @@
+use anyhow::Result;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
+use tokio::io::AsyncWriteExt;
 
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::kad::{QueryId, QueryResult};
-//#[cfg(feature = "file-sharing")]
-use libp2p::request_response::{Event, Message, OutboundRequestId, ResponseChannel};
+use libp2p::request_response::{Event, Message, OutboundRequestId};
 use libp2p::{
     core::Multiaddr,
     identify, kad,
@@ -18,15 +19,32 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
-use crate::commands::DragoonCommand;
+use crate::commands::{DragoonCommand, EncodingMethod};
 use crate::dragoon::Behaviour;
 use crate::error::DragoonError::{
-    BadListener, BootstrapError, DialError, PeerNotFound, ProviderError,
+    BadListener, BootstrapError, DialError, NoParentDirectory, PeerNotFound, ProviderError,
 };
+
+use komodo::{
+    self,
+    fec::{self, Shard},
+    fs,
+    linalg::Matrix,
+    zk::Powers,
+};
+
+use rand;
+
+use ark_ec::CurveGroup;
+use ark_ff::PrimeField;
+use ark_poly::DenseUVPolynomial;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
+use ark_std::ops::Div;
 
 use crate::dragoon::DragoonEvent;
 
@@ -35,9 +53,13 @@ pub struct FileRequest(String);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FileResponse(Option<Vec<u8>>);
 
-pub(crate) async fn create_swarm(
+pub(crate) async fn create_swarm<F, G>(
     id_keys: Keypair,
-) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
+) -> Result<Swarm<DragoonBehaviour<F, G>>, Box<dyn Error>>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     let peer_id = id_keys.public().to_peer_id();
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_async_std()
@@ -62,7 +84,7 @@ pub(crate) async fn create_swarm(
                 )],
                 request_response::Config::default(),
             ),
-            dragoon: Behaviour::new("/dragoon/1.0.0".to_string()),
+            dragoon: Behaviour::new(),
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60 * 60)))
         .build();
@@ -75,34 +97,30 @@ pub(crate) async fn create_swarm(
     Ok(swarm)
 }
 
-#[cfg(feature = "file-sharing")]
-#[derive(Debug)]
-pub(crate) enum DragoonEvent {
-    InboundRequest {
-        request: String,
-        channel: ResponseChannel<FileResponse>,
-    },
-}
-
 #[derive(NetworkBehaviour)]
-pub(crate) struct DragoonBehaviour {
+pub(crate) struct DragoonBehaviour<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
     identify: identify::Behaviour,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
-    dragoon: Behaviour,
+    dragoon: Behaviour<F, G>,
 }
 
-pub(crate) struct DragoonNetwork {
-    swarm: Swarm<DragoonBehaviour>,
+pub(crate) struct DragoonNetwork<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
+    swarm: Swarm<DragoonBehaviour<F, G>>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
-    #[cfg(feature = "file-sharing")]
-    event_sender: mpsc::Sender<DragoonEvent>,
     listeners: HashMap<u64, ListenerId>,
     pending_start_providing:
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_get_providers:
         HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
-    //#[cfg(feature = "file-sharing")]
     pending_request_file:
         HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
     pending_put_record: HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
@@ -110,34 +128,38 @@ pub(crate) struct DragoonNetwork {
         HashMap<kad::QueryId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
 }
 
-impl DragoonNetwork {
+impl<F, G> DragoonNetwork<F, G>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
     pub fn new(
-        swarm: Swarm<DragoonBehaviour>,
+        swarm: Swarm<DragoonBehaviour<F, G>>,
         command_receiver: mpsc::Receiver<DragoonCommand>,
-        #[cfg(feature = "file-sharing")] event_sender: mpsc::Sender<DragoonEvent>,
     ) -> Self {
         Self {
             swarm,
             command_receiver,
-            #[cfg(feature = "file-sharing")]
-            event_sender,
             listeners: HashMap::new(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
-            //#[cfg(feature = "file-sharing")]
             pending_request_file: Default::default(),
             pending_put_record: Default::default(),
             pending_get_record: Default::default(),
         }
     }
 
-    pub async fn run(mut self) {
+    pub async fn run<P>(mut self)
+    where
+        P: DenseUVPolynomial<F>,
+        for<'a, 'b> &'a P: Div<&'b P, Output = P>,
+    {
         info!("Starting Dragoon Network");
         loop {
             futures::select! {
                 e = self.swarm.next() => self.handle_event(e.expect("Swarm stream to be infinite.")).await,
                 cmd = self.command_receiver.next() =>  match cmd {
-                    Some(c) => self.handle_command(c).await,
+                    Some(c) => self.handle_command::<P>(c).await,
                     None => return,
                 }
             }
@@ -212,8 +234,9 @@ impl DragoonNetwork {
                 };
 
                 if let Some(sender) = self.pending_get_record.remove(&id) {
-                    debug!("Sending value {:?}", value);
+                    debug!("Writing value to disk: {:?}", value);
                     if sender.send(Ok(value)).is_err() {
+                        //TODO change this to write the value to disk
                         error!("Cannot send result");
                     }
                 } else {
@@ -248,61 +271,15 @@ impl DragoonNetwork {
         }
     }
 
-    #[cfg(feature = "file-sharing")]
-    async fn handle_request_response(
-        &mut self,
-        request_response: DragoonEvent<FileRequest, FileResponse>,
-    ) {
-        match request_response {
-            DragoonEvent::Message { message, .. } => match message {
-                Message::Request {
-                    request, channel, ..
-                } => {
-                    debug!("Sending inbound request '{}'", request.0);
-                    if let Err(se) = self
-                        .event_sender
-                        .send(DragoonEvent::InboundRequest {
-                            request: request.0,
-                            channel,
-                        })
-                        .await
-                    {
-                        error!("could not send inbound request: {}", se);
-                    }
-                }
-                Message::Response {
-                    request_id,
-                    response,
-                } => {
-                    debug!("Preparing response from request {}", request_id);
-                    if let Some(sender) = self.pending_request_file.remove(&request_id) {
-                        debug!("Sending response {:?}", response);
-                        if sender.send(Ok(response.0)).is_err() {
-                            error!("Could not send result");
-                        }
-                    } else {
-                        error!("could not find {} in the request files", request_id);
-                    }
-                }
-            },
-            DragoonEvent::OutboundFailure {
-                request_id, error, ..
-            } => {
-                debug!("Request {} failed with {}", request_id, error);
-                if let Some(sender) = self.pending_request_file.remove(&request_id) {
-                    debug!("Sending error {}", error);
-                    if sender.send(Err(Box::new(error))).is_err() {
-                        error!("Could not send result");
-                    }
-                } else {
-                    error!("could not find {} in the request files", request_id);
-                }
-            }
-            e => warn!("[unknown event] {:?}", e),
-        }
-    }
+    // async fn query_get_record_dump(value: Vec<u8>, dump_dir: String, filename: String) -> Result<()> {
+    //     let dump_path = Path::new(dump_dir).join(&Path::new(filename));
+    //     info!("Dumping the file to: {:?}", dump_path);
+    //     let mut file = File::create(&dump_path)?;
+    //     file.write_all(&value)?;
+    //     Ok(())
+    // }
 
-    async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent>) {
+    async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent<F, G>>) {
         debug!("[event] {:?}", event);
         match event {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
@@ -344,25 +321,21 @@ impl DragoonNetwork {
                     error!("Peer {} not added, no listen address", peer_id);
                 }
             }
-            #[cfg(feature = "file-sharing")]
-            SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(request_response)) => {
-                self.handle_request_response(request_response).await;
-            }
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Dragoon(event)) => match event {
                 DragoonEvent::Sent { peer } => {
                     info!("Sent a shard to peer {peer}");
                 }
-                DragoonEvent::Received { shard } => {
-                    info!("Received a shard : {shard:?}");
+                DragoonEvent::Received { block } => {
+                    info!("Received a shard : {block:?}");
                     self.swarm
                         .behaviour_mut()
                         .kademlia
-                        .start_providing(shard.hash.into())
+                        .start_providing(block.shard.hash.into())
                         .unwrap();
                 }
             },
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestResponse(Event::Message {
-                peer,
+                peer: _,
                 message,
             })) => match message {
                 Message::Request {
@@ -416,7 +389,11 @@ impl DragoonNetwork {
         }
     }
 
-    async fn handle_command(&mut self, cmd: DragoonCommand) {
+    async fn handle_command<P>(&mut self, cmd: DragoonCommand)
+    where
+        P: DenseUVPolynomial<F>,
+        for<'a, 'b> &'a P: Div<&'b P, Output = P>,
+    {
         debug!("[cmd] {:?}", cmd);
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
@@ -633,45 +610,20 @@ impl DragoonNetwork {
                     }
                 }
             }
-            #[cfg(feature = "file-sharing")]
-            DragoonCommand::GetFile { key, peer, sender } => {
-                let request_id = self
-                    .swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_request(&peer, FileRequest(key));
-                self.pending_request_file.insert(request_id, sender);
-            }
-            #[cfg(feature = "file-sharing")]
-            DragoonCommand::AddFile { file, channel } => {
-                if self
-                    .swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_response(channel, FileResponse(file))
-                    .is_err()
-                {
-                    error!("Could not send response");
-                }
-            }
-            DragoonCommand::PutRecord { key, value, sender } => {
-                let record = kad::Record {
-                    key: key.into_bytes().into(),
-                    value,
-                    publisher: None,
-                    expires: None,
-                };
-                if let Ok(id) = self
-                    .swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .put_record(record, kad::Quorum::One)
-                {
+            DragoonCommand::PutRecord {
+                block_hash,
+                block_dir,
+                sender,
+            } => match Self::put_record(self, block_hash, block_dir).await {
+                Ok(id) => {
                     self.pending_put_record.insert(id, sender);
-                } else {
-                    error!("Could not put record ");
                 }
-            }
+                Err(err) => {
+                    if sender.send(Err(err).map_err(|e| e.into())).is_err() {
+                        error!("Could not send the result of the put_record operation")
+                    }
+                }
+            },
             DragoonCommand::GetRecord { key, sender } => {
                 let id = self
                     .swarm
@@ -689,33 +641,38 @@ impl DragoonNetwork {
                 }
             }
             DragoonCommand::DragoonSend {
-                data,
+                block_hash,
+                block_path,
                 peerid,
                 sender,
-            } => match PeerId::from_str(peerid.as_str()) {
-                Ok(peer) => {
-                    if self
-                        .swarm
-                        .behaviour_mut()
-                        .dragoon
-                        .send_data_to_peer(data, peer)
-                    {
-                        if sender.send(Ok(())).is_err() {
-                            error!("could not send result");
+            } =>
+            // TODO go search the block on the disk
+            {
+                match PeerId::from_str(peerid.as_str()) {
+                    Ok(peer) => {
+                        if self
+                            .swarm
+                            .behaviour_mut()
+                            .dragoon
+                            .send_data_to_peer(block_hash, block_path, peer)
+                        {
+                            if sender.send(Ok(())).is_err() {
+                                error!("could not send result");
+                            }
+                        } else {
+                            let err = PeerNotFound;
+                            if sender.send(Err(Box::new(err))).is_err() {
+                                error!("Cannot send result");
+                            }
                         }
-                    } else {
-                        let err = PeerNotFound;
+                    }
+                    Err(err) => {
                         if sender.send(Err(Box::new(err))).is_err() {
                             error!("Cannot send result");
                         }
                     }
                 }
-                Err(err) => {
-                    if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
-                    }
-                }
-            },
+            }
             DragoonCommand::DragoonGet {
                 peerid,
                 key,
@@ -735,6 +692,165 @@ impl DragoonNetwork {
                     }
                 }
             },
+            DragoonCommand::DecodeBlocks {
+                block_dir,
+                block_hashes,
+                output_filename,
+                sender,
+            } => {
+                if sender
+                    .send(
+                        Self::decode_blocks(block_dir, block_hashes, output_filename)
+                            .await
+                            .map_err(|err| err.into()),
+                    )
+                    .is_err()
+                {
+                    error!("Could not send the result of the decode_blocks operation")
+                }
+            }
+            DragoonCommand::EncodeFile {
+                file_path,
+                replace_blocks,
+                encoding_method,
+                encode_mat_k,
+                encode_mat_n,
+                powers_path,
+                sender,
+            } => {
+                if sender
+                    .send(
+                        Self::encode_file(
+                            file_path,
+                            replace_blocks,
+                            encoding_method,
+                            encode_mat_k,
+                            encode_mat_n,
+                            powers_path,
+                        )
+                        .await
+                        .map_err(|err| err.into()),
+                    )
+                    .is_err()
+                {
+                    error!("Could not send the result of the encode_file operation")
+                }
+            }
         }
+    }
+
+    async fn put_record(&mut self, block_hash: String, block_dir: String) -> Result<QueryId> {
+        let block = fs::read_blocks::<F, G>(
+            &[block_hash.clone()],
+            Path::new(&block_dir),
+            Compress::Yes,
+            Validate::Yes,
+        )?[0]
+            .clone()
+            .1;
+        let mut buf = vec![0; block.serialized_size(Compress::Yes)];
+        block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+        let record = kad::Record {
+            key: block_hash.into_bytes().into(),
+            value: buf,
+            publisher: None,
+            expires: None,
+        };
+        info!("Putting record {:?} in a kad record", record);
+        let id = self
+            .swarm
+            .behaviour_mut()
+            .kademlia
+            .put_record(record, kad::Quorum::One)?;
+
+        Ok(id)
+    }
+
+    async fn decode_blocks(
+        block_dir: String,
+        block_hashes: Vec<String>,
+        output_filename: String,
+    ) -> Result<()> {
+        let blocks = fs::read_blocks::<F, G>(
+            &block_hashes,
+            &Path::new(&block_dir),
+            Compress::Yes,
+            Validate::Yes,
+        )?;
+        let shards: Vec<Shard<F>> = blocks.into_iter().map(|b| b.1.shard).collect();
+        let vec_bytes = fec::decode::<F>(shards)?;
+        if let Some(parent_dir_path) = Path::new(&block_dir).parent() {
+            let file_path: PathBuf = [parent_dir_path, Path::new(&output_filename)]
+                .iter()
+                .collect();
+            info!("Trying to create a file at {:?}", file_path);
+            let mut file = tokio::fs::File::create(file_path).await?;
+            file.write_all(vec_bytes.as_slice()).await?;
+        } else {
+            error!("Parent of the block directory does not exist");
+            let err = NoParentDirectory(block_dir);
+            return Err(err.into());
+        }
+        Ok(())
+    }
+
+    async fn encode_file<P>(
+        file_path: String,
+        replace_blocks: bool,
+        encoding_method: EncodingMethod,
+        encode_mat_k: usize,
+        encode_mat_n: usize,
+        powers_path: String,
+    ) -> Result<String>
+    where
+        P: DenseUVPolynomial<F>,
+        for<'a, 'b> &'a P: Div<&'b P, Output = P>,
+    {
+        info!("Reading file to convert from {:?}", file_path);
+        let bytes = tokio::fs::read(&file_path).await?;
+        let encoding_mat = match encoding_method {
+            EncodingMethod::Vandermonde => {
+                let points: Vec<F> = (0..encode_mat_n)
+                    .map(|i| F::from_le_bytes_mod_order(&i.to_le_bytes()))
+                    .collect();
+                Matrix::vandermonde(&points, encode_mat_k)?
+            }
+            EncodingMethod::Random => {
+                // use of RNG in async: https://stackoverflow.com/a/75227719
+                let mut rng = rand::thread_rng();
+                Matrix::random(encode_mat_k, encode_mat_n, &mut rng)
+            }
+        };
+        let shards = fec::encode::<F>(&bytes, &encoding_mat)?;
+        info!("Getting the powers from {:?}", powers_path);
+        let serialized = tokio::fs::read(powers_path).await?;
+        let powers =
+            Powers::<F, G>::deserialize_with_mode(&serialized[..], Compress::Yes, Validate::Yes)?;
+        let proof = komodo::prove::<F, G, P>(&bytes, &powers, encode_mat_k)?;
+        let blocks = komodo::build::<F, G, P>(&shards, &proof);
+        let file_dir = if let Some(file_dir) = Path::new(&file_path).parent() {
+            file_dir
+        } else {
+            error!("Parent of the block directory does not exist");
+            let err = NoParentDirectory(file_path);
+            return Err(err.into());
+        };
+        let block_dir: PathBuf = [file_dir, Path::new("blocks")].iter().collect();
+        info!(
+            "Checking if the block directory already exists or not: {:?}",
+            block_dir
+        );
+        let dir_exists = tokio::fs::try_exists(&block_dir).await?;
+        if dir_exists && replace_blocks {
+            info!(
+                "Replace block option has been chosen, removing the directory at {:?}",
+                block_dir
+            );
+            tokio::fs::remove_dir_all(&block_dir).await?;
+        }
+        info!("Creating directory at {:?}", block_dir);
+        tokio::fs::create_dir(&block_dir).await?;
+        let formatted_output = fs::dump_blocks(&blocks, &block_dir, Compress::Yes)?;
+        Ok(formatted_output)
     }
 }

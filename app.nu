@@ -1,4 +1,5 @@
 use std log
+use komodo/binary.nu "bytes from_int"
 
 const HTTP = {
     OK: 200,
@@ -6,6 +7,7 @@ const HTTP = {
 }
 
 const DEFAULT_IP = "127.0.0.1:3000"
+const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
 
 # def "http get-curl" [url: string, --allow-errors, --full]: nothing -> record<body: string, status: int> {
 #     $url
@@ -57,7 +59,7 @@ export def listen [
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"($node) listening on ($multiaddr)..."
-    let multiaddr = $multiaddr | str replace --all '/' '%2F'
+    let multiaddr = $multiaddr | slash replace
 
     $"listen/($multiaddr)" | run-command $node
 }
@@ -104,7 +106,7 @@ export def dial [
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"dialing ($multiaddr) from ($node)"
-    let multiaddr = $multiaddr | str replace --all '/' '%2F'
+    let multiaddr = $multiaddr | slash replace
 
     $"dial/($multiaddr)" | run-command $node
 }
@@ -114,7 +116,7 @@ export def add-peer [
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"adding peer ($multiaddr) to ($node)"
-    let multiaddr = $multiaddr | str replace --all '/' '%2F'
+    let multiaddr = $multiaddr | slash replace
 
     $"add-peer/($multiaddr)" | run-command $node
 }
@@ -160,18 +162,56 @@ export def add-file [
 }
 
 export def put-record [
-    key: string,
-    value: string,
+    block_hash: string,
+    block_dir: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
-    log debug $"putting record {($key): ($value)} into ($node)"
-    $"put-record/($key)/($value)" | run-command $node
+    log debug $"putting record ($block_dir)/($block_hash) into ($node)"
+    $"put-record/($block_hash)/($block_dir | slash replace)" | run-command $node
 }
 
 export def get-record [
     key: string,
+    --output: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
     log debug $"getting record with key ($key) from ($node)"
-    $"get-record/($key)" | run-command $node
+    let result = $"get-record/($key)" | run-command $node
+    if $output != null {
+        $result | bytes from_int out> $output
+    } else {
+        $result
+    }
+    
+}
+
+export def decode-blocks [
+    block_dir: string,
+    block_hashes: list<string>,
+    output_filename: string,
+    --node: string = $DEFAULT_IP,
+]: nothing -> any {
+    log debug $"decoding the blocks ($block_hashes) from ($block_dir)"
+    let message = $"decode-blocks/($block_dir | slash replace)/($block_hashes | to json)/($output_filename)"
+    $message | run-command $node
+}
+
+export def encode-file [
+    file_path: string,
+    --powers_path: string = $POWERS_PATH,
+    --replace-blocks = true,
+    --k: int = 3,
+    --n: int = 5,
+    --encoding_method: string = Random,
+    --node: string = $DEFAULT_IP,
+] nothing -> any {
+    log debug $"encoding the file ($file_path)"
+    let file_path_enc = $file_path | slash replace
+    let powers_path_enc = ($powers_path | slash replace)
+    let list_args = [$file_path_enc, $replace_blocks, $encoding_method, $k, $n, $powers_path_enc]
+    $"encode-file/($list_args | str join '/')" | run-command $node
+}
+
+def "slash replace" [] string -> string {
+    $in | str replace --all '/' '%2F'
 }
