@@ -161,30 +161,6 @@ export def add-file [
     $"add-file/($key)/($content)" | run-command $node
 }
 
-export def put-record [
-    block_hash: string,
-    block_dir: string,
-    --node: string = $DEFAULT_IP
-]: nothing -> any {
-    log debug $"putting record ($block_dir)/($block_hash) into ($node)"
-    $"put-record/($block_hash)/($block_dir | slash replace)" | run-command $node
-}
-
-export def get-record [
-    key: string,
-    --output: string,
-    --node: string = $DEFAULT_IP
-]: nothing -> any {
-    log debug $"getting record with key ($key) from ($node)"
-    let result = $"get-record/($key)" | run-command $node
-    if $output != null {
-        $result | bytes from_int out> $output
-    } else {
-        $result
-    }
-    
-}
-
 export def decode-blocks [
     block_dir: string,
     block_hashes: list<string>,
@@ -210,6 +186,16 @@ export def encode-file [
     let powers_path_enc = ($powers_path | slash replace)
     let list_args = [$file_path_enc, $replace_blocks, $encoding_method, $k, $n, $powers_path_enc]
     $"encode-file/($list_args | str join '/')" | run-command $node
+}
+
+export def get-block-from [
+    peer_id_base_58: string,
+    file_hash: string,
+    block_hash: string,
+    --node: string = $DEFAULT_IP
+] nothing -> any {
+    log debug $"get block ($block_hash) part of file ($file_hash) from peer ($peer_id_base_58)"
+    $"get-block-from/($peer_id_base_58)/($file_hash)/($block_hash)" | run-command $node | bytes from_int
 }
 
 def "slash replace" [] string -> string {
