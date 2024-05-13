@@ -27,7 +27,7 @@ macro_rules! impl_Convert {
 }
 
 // impl convert for all the types that are already Serialize and thus just return themselves
-impl_Convert!(for u64, String, bool, &str, Vec<Multiaddr>, Vec<u8>, (String, String));
+impl_Convert!(for u64, String, bool, &str, Vec<Multiaddr>, Vec<u8>);
 
 impl ConvertSer for PeerId {
     fn convert_ser(&self) -> impl Serialize {

@@ -3,7 +3,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use bs58;
 use futures::channel::oneshot::{self, Canceled};
 use futures::SinkExt;
 use libp2p::swarm::NetworkInfo;
@@ -63,11 +62,11 @@ pub(crate) enum DragoonCommand {
         multiaddr: String,
         sender: Sender<()>,
     },
-    // DragoonGet {
-    //     peerid: String,
-    //     key: String,
-    //     sender: Sender<Vec<u8>>,
-    // },
+    DragoonGet {
+        peerid: String,
+        key: String,
+        sender: Sender<Vec<u8>>,
+    },
     DragoonPeers {
         sender: Sender<HashSet<PeerId>>,
     },
@@ -84,13 +83,7 @@ pub(crate) enum DragoonCommand {
         encode_mat_k: usize,
         encode_mat_n: usize,
         powers_path: String,
-        sender: Sender<(String, String)>,
-    },
-    GetBlockFrom {
-        peer_id: PeerId,
-        file_hash: String,
-        block_hash: String,
-        sender: Sender<Vec<u8>>,
+        sender: Sender<String>,
     },
     GetConnectedPeers {
         sender: Sender<Vec<PeerId>>,
@@ -106,11 +99,20 @@ pub(crate) enum DragoonCommand {
     },
     GetProviders {
         key: String,
-        sender: Sender<Vec<PeerId>>,
+        sender: Sender<HashSet<PeerId>>,
+    },
+    GetRecord {
+        key: String,
+        sender: Sender<Vec<u8>>,
     },
     Listen {
         multiaddr: String,
         sender: Sender<u64>,
+    },
+    PutRecord {
+        block_hash: String,
+        block_dir: String,
+        sender: Sender<()>,
     },
     RemoveListener {
         listener_id: u64,
@@ -129,17 +131,18 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             DragoonCommand::DecodeBlocks { .. } => write!(f, "decode-blocks"),
             DragoonCommand::Dial { .. } => write!(f, "dial"),
-            //DragoonCommand::DragoonGet { .. } => write!(f, "dragoon-get"),
+            DragoonCommand::DragoonGet { .. } => write!(f, "dragoon-get"),
             DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
             DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
             DragoonCommand::EncodeFile { .. } => write!(f, "encode-file"),
-            DragoonCommand::GetBlockFrom { .. } => write!(f, "get-block-from"),
             DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
             DragoonCommand::GetListeners { .. } => write!(f, "get-listener"),
             DragoonCommand::GetPeerId { .. } => write!(f, "get-peer-id"),
             DragoonCommand::GetNetworkInfo { .. } => write!(f, "get-network-info"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
+            DragoonCommand::GetRecord { .. } => write!(f, "get-record"),
             DragoonCommand::Listen { .. } => write!(f, "listen"),
+            DragoonCommand::PutRecord { .. } => write!(f, "put-record"),
             DragoonCommand::RemoveListener { .. } => write!(f, "remove-listener"),
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
         }
@@ -233,13 +236,13 @@ pub(crate) async fn create_cmd_dial(
     dragoon_command!(state, Dial, multiaddr)
 }
 
-// pub(crate) async fn create_cmd_dragoon_get(
-//     Path((peerid, key)): Path<(String, String)>,
-//     State(state): State<Arc<AppState>>,
-// ) -> Response {
-//     info!("running command `dragoon_get`");
-//     dragoon_command!(state, DragoonGet, peerid, key)
-// }
+pub(crate) async fn create_cmd_dragoon_get(
+    Path((peerid, key)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `dragoon_get`");
+    dragoon_command!(state, DragoonGet, peerid, key)
+}
 
 pub(crate) async fn create_cmd_dragoon_peers(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `dragoon_peers`");
@@ -269,16 +272,6 @@ pub(crate) async fn create_cmd_encode_file(
         encode_mat_n,
         powers_path
     )
-}
-
-pub(crate) async fn create_cmd_get_block_from(
-    Path((peer_id_base_58, file_hash, block_hash)): Path<(String, String, String)>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    info!("running command `get_from_from`");
-    let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
-    let peer_id = PeerId::from_bytes(&bytes).unwrap();
-    dragoon_command!(state, GetBlockFrom, peer_id, file_hash, block_hash)
 }
 
 pub(crate) async fn create_cmd_get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
@@ -338,12 +331,28 @@ pub(crate) async fn create_cmd_get_network_info(State(state): State<Arc<AppState
     dragoon_command!(state, GetNetworkInfo)
 }
 
+pub(crate) async fn create_cmd_get_record(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `get_record`");
+    dragoon_command!(state, GetRecord, key)
+}
+
 pub(crate) async fn create_cmd_listen(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command `listen`");
     dragoon_command!(state, Listen, multiaddr)
+}
+
+pub(crate) async fn create_cmd_put_record(
+    Path((block_hash, block_dir)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `put_record`");
+    dragoon_command!(state, PutRecord, block_hash, block_dir)
 }
 
 pub(crate) async fn create_cmd_remove_listener(
