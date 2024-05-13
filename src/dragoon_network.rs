@@ -17,7 +17,7 @@ use libp2p::{
     tcp, yamux, PeerId, StreamProtocol, TransportError,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -25,7 +25,7 @@ use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::commands::{DragoonCommand, EncodingMethod};
-use crate::dragoon::Behaviour;
+use crate::dragoon::{self, Behaviour};
 use crate::error::DragoonError::{
     BadListener, BootstrapError, DialError, NoParentDirectory, PeerNotFound, ProviderError,
 };
@@ -39,19 +39,24 @@ use komodo::{
 };
 
 use rand;
+use resolve_path::PathResolveExt;
+use rs_merkle::{algorithms::Sha256, Hasher};
 
 use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
 use ark_poly::DenseUVPolynomial;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
+use ark_serialize::{CanonicalDeserialize, Compress, Validate};
 use ark_std::ops::Div;
 
 use crate::dragoon::DragoonEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileRequest(String);
+pub(crate) struct BlockRequest {
+    file_hash: String,
+    block_hash: String,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FileResponse(Option<Vec<u8>>);
+pub(crate) struct BlockResponse(Vec<u8>);
 
 pub(crate) async fn create_swarm<F, G>(
     id_keys: Keypair,
@@ -61,6 +66,7 @@ where
     G: CurveGroup<ScalarField = F>,
 {
     let peer_id = id_keys.public().to_peer_id();
+
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_async_std()
         .with_tcp(
@@ -103,7 +109,7 @@ where
     F: PrimeField,
     G: CurveGroup<ScalarField = F>,
 {
-    request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
+    request_response: request_response::cbor::Behaviour<BlockRequest, BlockResponse>,
     identify: identify::Behaviour,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
     dragoon: Behaviour<F, G>,
@@ -117,15 +123,13 @@ where
     swarm: Swarm<DragoonBehaviour<F, G>>,
     command_receiver: mpsc::Receiver<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
+    file_dir: PathBuf,
     pending_start_providing:
         HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
     pending_get_providers:
-        HashMap<kad::QueryId, oneshot::Sender<Result<HashSet<PeerId>, Box<dyn Error + Send>>>>,
+        HashMap<kad::QueryId, oneshot::Sender<Result<Vec<PeerId>, Box<dyn Error + Send>>>>,
     pending_request_file:
         HashMap<OutboundRequestId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
-    pending_put_record: HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn Error + Send>>>>,
-    pending_get_record:
-        HashMap<kad::QueryId, oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>>,
 }
 
 impl<F, G> DragoonNetwork<F, G>
@@ -136,17 +140,34 @@ where
     pub fn new(
         swarm: Swarm<DragoonBehaviour<F, G>>,
         command_receiver: mpsc::Receiver<DragoonCommand>,
+        peer_id: PeerId,
+        replace: bool,
     ) -> Self {
         Self {
             swarm,
             command_receiver,
             listeners: HashMap::new(),
+            file_dir: Self::create_block_dir(peer_id, replace).unwrap(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
             pending_request_file: Default::default(),
-            pending_put_record: Default::default(),
-            pending_get_record: Default::default(),
         }
+    }
+
+    fn create_block_dir(peer_id: PeerId, replace: bool) -> std::io::Result<PathBuf> {
+        // * change the replace bool to be read from CLI
+        let base_path = format!("~/.share/dragoonfly/{}/files", peer_id.to_base58())
+            .resolve()
+            .into_owned(); // * needs to be changed to allow taking the base path as argument from CLI
+        if replace {
+            let _ = std::fs::remove_dir_all(&base_path); // ignore the error if the directory does not exist
+        }
+        std::fs::create_dir_all(&base_path)?;
+        info!(
+            "Created the directory for node {} at {:?}",
+            peer_id, base_path
+        );
+        Ok(base_path)
     }
 
     pub async fn run<P>(mut self)
@@ -184,17 +205,17 @@ where
                     match res {
                         kad::GetProvidersOk::FoundProviders { providers, .. } => {
                             info!("Found providers {:?}", providers);
-                            if let Some(sender) = self.pending_get_providers.remove(&id) {
-                                debug!("Sending providers: {:?}", providers);
-                                if sender.send(Ok(providers)).is_err() {
-                                    error!("Cannot send result");
-                                }
-                            } else {
-                                error!("could not find {} in the providers", id);
-                            }
                         }
                         kad::GetProvidersOk::FinishedWithNoAdditionalRecord { closest_peers } => {
                             info!("Finished get providers {closest_peers:?}");
+                            if let Some(sender) = self.pending_get_providers.remove(&id) {
+                                debug!("Sending all found providers: {:?}", closest_peers);
+                                if sender.send(Ok(closest_peers)).is_err() {
+                                    error!("Cannot send result");
+                                }
+                            } else {
+                                error!("could not find {} in the providers query list", id);
+                            }
                         }
                     }
                 } else {
@@ -205,7 +226,7 @@ where
                         {
                             query_id.finish();
                             debug!("Sending empty providers");
-                            if sender.send(Ok(HashSet::default())).is_err() {
+                            if sender.send(Ok(Vec::default())).is_err() {
                                 error!("Cannot send result");
                             }
                         } else {
@@ -222,62 +243,9 @@ where
                     }
                 }
             }
-            kad::QueryResult::GetRecord(Ok(get_record_ok)) => {
-                let value = match get_record_ok {
-                    kad::GetRecordOk::FoundRecord(record) => {
-                        info!("value found");
-                        record.record.value
-                    }
-                    kad::GetRecordOk::FinishedWithNoAdditionalRecord { .. } => {
-                        vec![]
-                    }
-                };
-
-                if let Some(sender) = self.pending_get_record.remove(&id) {
-                    debug!("Writing value to disk: {:?}", value);
-                    if sender.send(Ok(value)).is_err() {
-                        //TODO change this to write the value to disk
-                        error!("Cannot send result");
-                    }
-                } else {
-                    error!("could not find {} in the get records", id);
-                }
-            }
-            kad::QueryResult::GetRecord(Err(err)) => {
-                error!("Failed to get record: {err:?}");
-                if let Some(sender) = self.pending_get_record.remove(&id) {
-                    debug!("Sending empty value");
-                    if sender.send(Ok(vec![])).is_err() {
-                        error!("Cannot send result");
-                    }
-                } else {
-                    error!("could not find {} in the get records", id);
-                }
-            }
-            kad::QueryResult::PutRecord(Ok(kad::PutRecordOk { .. })) => {
-                if let Some(sender) = self.pending_put_record.remove(&id) {
-                    debug!("Sending empty response");
-                    if sender.send(Ok(())).is_err() {
-                        error!("Cannot send result");
-                    }
-                } else {
-                    error!("could not find {} in the put records", id);
-                }
-            }
-            kad::QueryResult::PutRecord(Err(err)) => {
-                error!("Failed to put record: {err:?}");
-            }
             e => warn!("[unknown event] {:?}", e),
         }
     }
-
-    // async fn query_get_record_dump(value: Vec<u8>, dump_dir: String, filename: String) -> Result<()> {
-    //     let dump_path = Path::new(dump_dir).join(&Path::new(filename));
-    //     info!("Dumping the file to: {:?}", dump_path);
-    //     let mut file = File::create(&dump_path)?;
-    //     file.write_all(&value)?;
-    //     Ok(())
-    // }
 
     async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent<F, G>>) {
         debug!("[event] {:?}", event);
@@ -341,47 +309,49 @@ where
                 Message::Request {
                     request, channel, ..
                 } => {
-                    if request.0 == "toto" {
-                        self.swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_response(channel, FileResponse(Some(vec![1, 2, 3, 4])));
-                        return;
-                    }
-                    if request.0 == "tata" {
-                        self.swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_response(channel, FileResponse(Some(vec![4, 3, 2, 1])));
-                        return;
-                    }
+                    let BlockRequest {
+                        file_hash,
+                        block_hash,
+                    } = request;
+                    let block_dir: PathBuf = [
+                        self.file_dir.clone(),
+                        PathBuf::from(file_hash.clone()),
+                        PathBuf::from("blocks"),
+                    ]
+                    .iter()
+                    .collect();
+                    info!(
+                        "Searching blocks for the file {0} inside {1:?}",
+                        file_hash.clone(),
+                        block_dir
+                    );
+                    // ! change this to use external function to return result
+                    let ser_block =
+                        dragoon::read_block_from_disk::<F, G>(block_hash.clone(), block_dir)
+                            .expect("Error message TODO");
+                    debug!(
+                        "Read block {0} for file {1}, got: {2:?}",
+                        block_hash, file_hash, ser_block
+                    );
                     self.swarm
                         .behaviour_mut()
                         .request_response
-                        .send_response(channel, FileResponse(None));
+                        .send_response(channel, BlockResponse(ser_block))
+                        .expect("Connection to peer to be still open.");
                 }
                 Message::Response {
                     request_id,
                     response,
                 } => {
-                    if self.pending_request_file.contains_key(&request_id) {
-                        info!("response: {:?}", response.0);
-                        if let Some(sender) = self.pending_request_file.remove(&request_id) {
-                            if let Some(res) = response.0 {
-                                if sender.send(Ok(res)).is_err() {
-                                    error!("Could not send result");
-                                }
-                            } else {
-                                let err = ProviderError(format!("data not found"));
-
-                                debug!("sending error {}", err);
-                                if sender.send(Err(Box::new(err))).is_err() {
-                                    error!("Could not send result");
-                                }
-                            }
-                        } else {
-                            error!("could not find {} in the request files", request_id);
+                    if let Some(sender) = self.pending_request_file.remove(&request_id) {
+                        if sender.send(Ok(response.0)).is_err() {
+                            error!("Couldn't send the result of the message response operation of id {}", request_id);
                         }
+                    } else {
+                        error!(
+                            "Could no find the sender associated with {} for the message response",
+                            request_id
+                        );
                     }
                 }
             },
@@ -610,27 +580,20 @@ where
                     }
                 }
             }
-            DragoonCommand::PutRecord {
+            DragoonCommand::GetBlockFrom {
+                peer_id,
+                file_hash,
                 block_hash,
-                block_dir,
                 sender,
-            } => match Self::put_record(self, block_hash, block_dir).await {
-                Ok(id) => {
-                    self.pending_put_record.insert(id, sender);
-                }
-                Err(err) => {
-                    if sender.send(Err(err).map_err(|e| e.into())).is_err() {
-                        error!("Could not send the result of the put_record operation")
-                    }
-                }
-            },
-            DragoonCommand::GetRecord { key, sender } => {
-                let id = self
-                    .swarm
-                    .behaviour_mut()
-                    .kademlia
-                    .get_record(key.into_bytes().into());
-                self.pending_get_record.insert(id, sender);
+            } => {
+                let request_id = self.swarm.behaviour_mut().request_response.send_request(
+                    &peer_id,
+                    BlockRequest {
+                        file_hash,
+                        block_hash,
+                    },
+                );
+                self.pending_request_file.insert(request_id, sender);
             }
             DragoonCommand::DragoonPeers { sender } => {
                 if sender
@@ -673,25 +636,25 @@ where
                     }
                 }
             }
-            DragoonCommand::DragoonGet {
-                peerid,
-                key,
-                sender,
-            } => match PeerId::from_str(peerid.as_str()) {
-                Ok(peer) => {
-                    let request_id = self
-                        .swarm
-                        .behaviour_mut()
-                        .request_response
-                        .send_request(&peer, FileRequest(key));
-                    self.pending_request_file.insert(request_id, sender);
-                }
-                Err(err) => {
-                    if sender.send(Err(Box::new(err))).is_err() {
-                        error!("Cannot send result");
-                    }
-                }
-            },
+            // DragoonCommand::DragoonGet {
+            //     peerid,
+            //     key,
+            //     sender,
+            // } => match PeerId::from_str(peerid.as_str()) {
+            //     Ok(peer) => {
+            //         let request_id = self
+            //             .swarm
+            //             .behaviour_mut()
+            //             .request_response
+            //             .send_request(&peer, BlockRequest(key));
+            //         self.pending_request_file.insert(request_id, sender);
+            //     }
+            //     Err(err) => {
+            //         if sender.send(Err(Box::new(err))).is_err() {
+            //             error!("Cannot send result");
+            //         }
+            //     }
+            // },
             DragoonCommand::DecodeBlocks {
                 block_dir,
                 block_hashes,
@@ -720,7 +683,7 @@ where
             } => {
                 if sender
                     .send(
-                        Self::encode_file(
+                        self.encode_file(
                             file_path,
                             replace_blocks,
                             encoding_method,
@@ -739,32 +702,33 @@ where
         }
     }
 
-    async fn put_record(&mut self, block_hash: String, block_dir: String) -> Result<QueryId> {
-        let block = fs::read_blocks::<F, G>(
-            &[block_hash.clone()],
-            Path::new(&block_dir),
-            Compress::Yes,
-            Validate::Yes,
-        )?[0]
-            .clone()
-            .1;
-        let mut buf = vec![0; block.serialized_size(Compress::Yes)];
-        block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
-        let record = kad::Record {
-            key: block_hash.into_bytes().into(),
-            value: buf,
-            publisher: None,
-            expires: None,
-        };
-        info!("Putting record {:?} in a kad record", record);
-        let id = self
-            .swarm
-            .behaviour_mut()
-            .kademlia
-            .put_record(record, kad::Quorum::One)?;
+    // * keeping for later for the logic of block read and serialize
+    // async fn put_record(&mut self, block_hash: String, block_dir: String) -> Result<QueryId> {
+    //     let block = fs::read_blocks::<F, G>(
+    //         &[block_hash.clone()],
+    //         Path::new(&block_dir),
+    //         Compress::Yes,
+    //         Validate::Yes,
+    //     )?[0]
+    //         .clone()
+    //         .1;
+    //     let mut buf = vec![0; block.serialized_size(Compress::Yes)];
+    //     block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+    //     let record = kad::Record {
+    //         key: block_hash.into_bytes().into(),
+    //         value: buf,
+    //         publisher: None,
+    //         expires: None,
+    //     };
+    //     info!("Putting record {:?} in a kad record", record);
+    //     let id = self
+    //         .swarm
+    //         .behaviour_mut()
+    //         .kademlia
+    //         .put_record(record, kad::Quorum::One)?;
 
-        Ok(id)
-    }
+    //     Ok(id)
+    // }
 
     async fn decode_blocks(
         block_dir: String,
@@ -795,19 +759,25 @@ where
     }
 
     async fn encode_file<P>(
+        &mut self,
         file_path: String,
         replace_blocks: bool,
         encoding_method: EncodingMethod,
         encode_mat_k: usize,
         encode_mat_n: usize,
         powers_path: String,
-    ) -> Result<String>
+    ) -> Result<(String, String)>
     where
         P: DenseUVPolynomial<F>,
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
         info!("Reading file to convert from {:?}", file_path);
         let bytes = tokio::fs::read(&file_path).await?;
+        let file_hash = Sha256::hash(&bytes)
+            .iter()
+            .map(|x| format!("{:x}", x))
+            .collect::<Vec<_>>()
+            .join("");
         let encoding_mat = match encoding_method {
             EncodingMethod::Vandermonde => {
                 let points: Vec<F> = (0..encode_mat_n)
@@ -828,14 +798,10 @@ where
             Powers::<F, G>::deserialize_with_mode(&serialized[..], Compress::Yes, Validate::Yes)?;
         let proof = komodo::prove::<F, G, P>(&bytes, &powers, encode_mat_k)?;
         let blocks = komodo::build::<F, G, P>(&shards, &proof);
-        let file_dir = if let Some(file_dir) = Path::new(&file_path).parent() {
-            file_dir
-        } else {
-            error!("Parent of the block directory does not exist");
-            let err = NoParentDirectory(file_path);
-            return Err(err.into());
-        };
-        let block_dir: PathBuf = [file_dir, Path::new("blocks")].iter().collect();
+        let file_dir: PathBuf = [self.file_dir.clone(), PathBuf::from(file_hash.clone())]
+            .iter()
+            .collect();
+        let block_dir: PathBuf = [&file_dir, Path::new("blocks")].iter().collect();
         info!(
             "Checking if the block directory already exists or not: {:?}",
             block_dir
@@ -849,8 +815,8 @@ where
             tokio::fs::remove_dir_all(&block_dir).await?;
         }
         info!("Creating directory at {:?}", block_dir);
-        tokio::fs::create_dir(&block_dir).await?;
+        tokio::fs::create_dir_all(&block_dir).await?;
         let formatted_output = fs::dump_blocks(&blocks, &block_dir, Compress::Yes)?;
-        Ok(formatted_output)
+        Ok((file_hash, formatted_output))
     }
 }

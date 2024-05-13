@@ -24,7 +24,7 @@ use komodo::{fs, Block};
 
 use anyhow::Result;
 
-use std::path::Path;
+use std::path::PathBuf;
 use tracing::info;
 
 #[derive(Debug)]
@@ -45,7 +45,6 @@ where
 #[derive(Debug)]
 pub(crate) enum Failure {
     Timeout,
-    Unsupported,
     Other { error: anyhow::Error },
 }
 
@@ -60,7 +59,6 @@ impl fmt::Display for Failure {
         match self {
             Failure::Timeout => f.write_str("Protocol timeout"),
             Failure::Other { error } => write!(f, "Protocol error: {error}"),
-            Failure::Unsupported => write!(f, "Protocol not supported"),
         }
     }
 }
@@ -70,7 +68,6 @@ impl Error for Failure {
         match self {
             Failure::Timeout => None,
             Failure::Other { error } => Some(&**error),
-            Failure::Unsupported => None,
         }
     }
 }
@@ -479,6 +476,21 @@ where
     }
 }
 
+pub(crate) fn read_block_from_disk<F, G>(block_hash: String, block_dir: PathBuf) -> Result<Vec<u8>>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
+    let block =
+        match fs::read_blocks::<F, G>(&[block_hash], &block_dir, Compress::Yes, Validate::Yes) {
+            Ok(vec) => vec[0].clone().1,
+            Err(e) => return Err(e), // ? would it be better to return the error
+        };
+    let mut buf = vec![0; block.serialized_size(Compress::Yes)];
+    block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+    Ok(buf)
+}
+
 pub(crate) async fn dragoon_send_data<S, F, G>(
     mut stream: S,
     block_hash: String,
@@ -489,17 +501,7 @@ where
     F: PrimeField,
     G: CurveGroup<ScalarField = F>,
 {
-    let block = match fs::read_blocks::<F, G>(
-        &[block_hash],
-        Path::new(&block_dir),
-        Compress::Yes,
-        Validate::Yes,
-    ) {
-        Ok(vec) => vec[0].clone().1,
-        Err(_) => panic!("Could not read block from disk"), // ? would it be better to return the error
-    };
-    let mut buf = vec![0; block.serialized_size(Compress::Yes)];
-    block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+    let buf = read_block_from_disk::<F, G>(block_hash, PathBuf::from(block_dir))?;
     stream.write_all(&buf[..]).await?;
     stream.flush().await?;
     let mut recv_payload = [0u8; 4];
