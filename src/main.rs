@@ -54,20 +54,15 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
             get(commands::create_cmd_get_providers),
         )
         .route("/bootstrap", get(commands::create_cmd_bootstrap))
-        .route(
-            "/put-record/:block_hash/:block_dir",
-            get(commands::create_cmd_put_record),
-        )
-        .route("/get-record/:key", get(commands::create_cmd_get_record))
         .route("/dragoon/peers", get(commands::create_cmd_dragoon_peers))
         .route(
             "/dragoon/send/:peer/:block_hash/:block_path",
             get(commands::create_cmd_dragoon_send),
         )
-        .route(
-            "/dragoon/get/:peer/:key",
-            get(commands::create_cmd_dragoon_get),
-        )
+        // .route(
+        //     "/dragoon/get/:peer/:key",
+        //     get(commands::create_cmd_dragoon_get),
+        // )
         .route(
             "/decode-blocks/:block-dir/:block_hashes/:output_filename",
             get(commands::create_cmd_decode_blocks),
@@ -75,7 +70,8 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
         .route(
             "/encode-file/:file_path/:replace-blocks/:encoding-method/:encode_mat_k/:encode_mat_n/:powers_path",
             get(commands::create_cmd_encode_file),
-        );
+        )
+        .route("/get-block-from/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_get_block_from));
 
     let router = router.with_state(Arc::new(app::AppState::new(cmd_sender)));
 
@@ -97,11 +93,12 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(http_server);
 
     let kp = get_keypair(id);
+    let peer_id = kp.public().to_peer_id();
     info!("IP/port: {}", ip_port);
-    info!("Peer ID: {} ({})", kp.public().to_peer_id(), id);
+    info!("Peer ID: {} ({})", peer_id, id);
 
     let swarm = dragoon_network::create_swarm::<Fr, G1Projective>(kp).await?;
-    let network = DragoonNetwork::new(swarm, cmd_receiver);
+    let network = DragoonNetwork::new(swarm, cmd_receiver, peer_id, true);
     tokio::spawn(network.run::<DensePolynomial<Fr>>());
 
     let shutdown = signal::ctrl_c();

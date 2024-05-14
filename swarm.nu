@@ -28,7 +28,7 @@ export def "swarm run" [
 
     log info $"logging to `($log_dir)/*.log`"
 
-    ^cargo build --release --features ($features | str join ",")
+    ^cargo build --release --features ($features | str join ",") 
     mkdir $log_dir
     for node in $swarm {
         # FIXME: don't use Bash here

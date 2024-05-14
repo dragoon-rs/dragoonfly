@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check check test show show-proxy unset-proxy
+.PHONY: fmt fmt-check check clippy test show show-proxy unset-proxy
 
 DEFAULT_GOAL: fmt-check check clippy test
 
@@ -9,7 +9,10 @@ fmt:
 	cargo fmt --all
 
 check:
-	cargo check --workspace
+	cargo check --workspace --profile ci-check
+
+clippy:
+	cargo clippy --workspace --all-targets -- -D warnings
 
 test:
 	nu tests/message_exchange.nu

@@ -45,7 +45,7 @@ test:
     - make show
 
   script:
-    - make check 
+    - make check clippy
     - echo "HTTP_PROXY = ${HTTP_PROXY}"
     - echo "http_proxy = ${http_proxy}" 
     - echo "HTTPS_PROXY = ${HTTPS_PROXY}"
