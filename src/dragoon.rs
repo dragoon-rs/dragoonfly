@@ -12,10 +12,9 @@ use libp2p::swarm::{
 };
 use libp2p::{Multiaddr, PeerId, Stream, StreamProtocol};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::error::Error;
+use std::io;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use std::{fmt, io};
 
 use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
@@ -24,8 +23,10 @@ use komodo::{fs, Block};
 
 use anyhow::Result;
 
-use std::path::Path;
+use std::path::PathBuf;
 use tracing::info;
+
+use crate::error::DragoonError::Timeout;
 
 #[derive(Debug)]
 pub(crate) enum InEvent {
@@ -42,40 +43,7 @@ where
     Received { block: Block<F, G> },
 }
 
-#[derive(Debug)]
-pub(crate) enum Failure {
-    Timeout,
-    Unsupported,
-    Other { error: anyhow::Error },
-}
-
-impl Failure {
-    fn other(e: anyhow::Error) -> Self {
-        Self::Other { error: e }
-    }
-}
-
-impl fmt::Display for Failure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Failure::Timeout => f.write_str("Protocol timeout"),
-            Failure::Other { error } => write!(f, "Protocol error: {error}"),
-            Failure::Unsupported => write!(f, "Protocol not supported"),
-        }
-    }
-}
-
-impl Error for Failure {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Failure::Timeout => None,
-            Failure::Other { error } => Some(&**error),
-            Failure::Unsupported => None,
-        }
-    }
-}
-
-type DragoonSendFuture = BoxFuture<'static, Result<(Stream, Duration), Failure>>;
+type DragoonSendFuture = BoxFuture<'static, Result<(Stream, Duration)>>;
 type DragoonRecvFuture<F, G> = BoxFuture<'static, Result<Block<F, G>, io::Error>>;
 
 pub(crate) struct Handler<F, G>
@@ -180,8 +148,8 @@ where
             }
         }
         for &id in to_remove.iter().rev() {
-            self.network_send_task.remove(id); // unused future in a sync function, but function can't be async
-                                               // should probably use something else
+            // ! drop the pinned future from memory as we don't need it anymore
+            std::mem::drop(self.network_send_task.remove(id));
         }
         if let Some(peer) = shard_sent {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
@@ -205,8 +173,8 @@ where
             }
         }
         for &id in to_remove.iter().rev() {
-            self.network_recv_task.remove(id); // unused future in a sync function, but function can't be async
-                                               // should probably use something else
+            // ! drop the pinned future from memory as we don't need it anymore
+            std::mem::drop(self.network_recv_task.remove(id));
         }
 
         if let Some(b) = shard_received {
@@ -372,9 +340,9 @@ where
                 handler: NotifyHandler::Any,
                 event: InEvent::Send((block_hash, block_path)),
             });
-            return true;
+            true
         } else {
-            return false;
+            false
         }
     }
 }
@@ -434,14 +402,12 @@ where
         println!("Behaviour::on_connection_handler_event, push Event {event:?}");
         match event {
             DragoonEvent::Sent { peer } => {
-                self.events.push_front(ToSwarm::GenerateEvent {
-                    0: DragoonEvent::Sent { peer },
-                });
+                self.events
+                    .push_front(ToSwarm::GenerateEvent(DragoonEvent::Sent { peer }));
             }
             DragoonEvent::Received { block } => {
-                self.events.push_front(ToSwarm::GenerateEvent {
-                    0: DragoonEvent::Received { block },
-                });
+                self.events
+                    .push_front(ToSwarm::GenerateEvent(DragoonEvent::Received { block }));
             }
         }
     }
@@ -462,7 +428,7 @@ async fn dragoon_send<F, G>(
     block_hash: String,
     block_dir: String,
     timeout: Duration,
-) -> Result<(Stream, Duration), Failure>
+) -> Result<(Stream, Duration)>
 where
     F: PrimeField,
     G: CurveGroup<ScalarField = F>,
@@ -474,9 +440,24 @@ where
 
     match future::select(req, Delay::new(timeout)).await {
         Either::Left((Ok((stream, rtt)), _)) => Ok((stream, rtt)),
-        Either::Left((Err(e), _)) => Err(Failure::other(e)),
-        Either::Right(((), _)) => Err(Failure::Timeout),
+        Either::Left((Err(e), _)) => Err(e),
+        Either::Right(((), _)) => Err(Timeout.into()),
     }
+}
+
+pub(crate) fn read_block_from_disk<F, G>(block_hash: String, block_dir: PathBuf) -> Result<Vec<u8>>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
+    let block =
+        match fs::read_blocks::<F, G>(&[block_hash], &block_dir, Compress::Yes, Validate::Yes) {
+            Ok(vec) => vec[0].clone().1,
+            Err(e) => return Err(e), // ? would it be better to return the error
+        };
+    let mut buf = vec![0; block.serialized_size(Compress::Yes)];
+    block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+    Ok(buf)
 }
 
 pub(crate) async fn dragoon_send_data<S, F, G>(
@@ -489,17 +470,7 @@ where
     F: PrimeField,
     G: CurveGroup<ScalarField = F>,
 {
-    let block = match fs::read_blocks::<F, G>(
-        &[block_hash],
-        Path::new(&block_dir),
-        Compress::Yes,
-        Validate::Yes,
-    ) {
-        Ok(vec) => vec[0].clone().1,
-        Err(_) => panic!("Could not read block from disk"), // ? would it be better to return the error
-    };
-    let mut buf = vec![0; block.serialized_size(Compress::Yes)];
-    block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
+    let buf = read_block_from_disk::<F, G>(block_hash, PathBuf::from(block_dir))?;
     stream.write_all(&buf[..]).await?;
     stream.flush().await?;
     let mut recv_payload = [0u8; 4];
@@ -509,11 +480,10 @@ where
     if recv_payload == [42, 42, 42, 42] {
         Ok((stream, started.elapsed()))
     } else {
-        Err(io::Error::new(
+        Err(anyhow::Error::from(io::Error::new(
             io::ErrorKind::InvalidData,
             "Dragoon payload mismatch",
-        ))
-        .map_err(anyhow::Error::from)
+        )))
     }
 }
 
@@ -533,8 +503,9 @@ where
     G: CurveGroup<ScalarField = F>,
 {
     println!("start receive data");
-    let mut payload = [0u8; 64];
-    stream.read(&mut payload).await?;
+    const PAYLOAD_SIZE: usize = 64;
+    let mut payload = [0u8; PAYLOAD_SIZE];
+    stream.read_exact(&mut payload).await?;
     let str = String::from_utf8(payload.to_vec()).unwrap();
     println!("received payload: {:?}", str);
     let response = [42, 42, 42, 42];
