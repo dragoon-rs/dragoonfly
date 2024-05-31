@@ -111,7 +111,7 @@ try {
     print "Checking the difference between the original and reconstructed file"
     let difference = {diff $"($output_dir)/../($res_filename)" $test_file} | exit_on_error | get stdout
     if $difference == "" {
-        print "Test successful !"
+        print $"(ansi light_green_reverse)    TEST SUCCESSFUL !(ansi reset)\n"
     } else {
         print "test failed, there was a difference between the files"
         error make {msg: "Exit to catch"}

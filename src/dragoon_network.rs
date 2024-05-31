@@ -20,7 +20,6 @@ use libp2p::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
@@ -70,9 +69,7 @@ pub(crate) struct PeerBlockInfoRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PeerBlockInfoResponse(PeerBlockInfo);
 
-pub(crate) async fn create_swarm(
-    id_keys: Keypair,
-) -> Result<Swarm<DragoonBehaviour>, Box<dyn Error>> {
+pub(crate) async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehaviour>> {
     let peer_id = id_keys.public().to_peer_id();
 
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
@@ -220,11 +217,7 @@ impl DragoonNetwork {
                     match res {
                         kad::GetProvidersOk::FoundProviders { providers, .. } => {
                             if let Some(sender) = self.pending_get_providers.get(&id) {
-                                if sender
-                                    .send(Ok(providers))
-                                    .map_err(|_| format_err!(""))
-                                    .is_err()
-                                {
+                                if sender.send(Ok(providers)).is_err() {
                                     error!("Could not send the result of the kademlia Found Providers query result");
                                 }
                             }
@@ -250,11 +243,7 @@ impl DragoonNetwork {
                         {
                             query_id.finish();
                             debug!("Sending empty providers");
-                            if sender
-                                .send(Ok(HashSet::default()))
-                                .map_err(|_| format_err!(""))
-                                .is_err()
-                            {
+                            if sender.send(Ok(HashSet::default())).is_err() {
                                 error!("Could not send empty result for the kademlia GetProviders query result");
                             }
                         } else {
@@ -262,11 +251,7 @@ impl DragoonNetwork {
                             let err =
                                 ProviderError(format!("could not find {} in the query ids", id));
                             debug!("Sending error");
-                            if sender
-                                .send(Err(Box::new(err)))
-                                .map_err(|_| format_err!(""))
-                                .is_err()
-                            {
+                            if sender.send(Err(format_err!(err))).is_err() {
                                 error!("Could not send error for the kademlia GetProviders query result");
                             }
                         }
@@ -431,7 +416,7 @@ impl DragoonNetwork {
             Validate::Yes,
         ) {
             Ok(vec) => vec[0].clone().1,
-            Err(e) => return Err(e), // ? would it be better to return the error
+            Err(e) => return Err(e),
         };
         let mut buf = vec![0; block.serialized_size(Compress::Yes)];
         block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
@@ -510,7 +495,7 @@ impl DragoonNetwork {
         debug!("[cmd] {:?}", cmd);
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
-                let res = self.listen(multiaddr).await.map_err(|err| err.into());
+                let res = self.listen(multiaddr).await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -575,10 +560,7 @@ impl DragoonNetwork {
                 listener_id,
                 sender,
             } => {
-                let res = self
-                    .remove_listener(listener_id)
-                    .await
-                    .map_err(|err| err.into());
+                let res = self.remove_listener(listener_id).await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -625,8 +607,7 @@ impl DragoonNetwork {
                         output_filename,
                         powers_path,
                     )
-                    .await
-                    .map_err(|err| err.into());
+                    .await;
                     if match sender {
                         Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                         Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -641,7 +622,7 @@ impl DragoonNetwork {
                 });
             }
             DragoonCommand::Dial { multiaddr, sender } => {
-                let res = self.dial(multiaddr).await.map_err(|err| err.into());
+                let res = self.dial(multiaddr).await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -652,7 +633,7 @@ impl DragoonNetwork {
                 }
             }
             DragoonCommand::AddPeer { multiaddr, sender } => {
-                let res = self.add_peer(multiaddr).await.map_err(|err| err.into());
+                let res = self.add_peer(multiaddr).await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -676,12 +657,12 @@ impl DragoonNetwork {
 
                     debug!("sending error {}", err);
                     if match sender {
-                        Sender::SenderMPSC(sender) => {
-                            sender.send(Err(Box::new(err))).map_err(|_| format_err!(""))
-                        }
-                        Sender::SenderOneS(sender) => {
-                            sender.send(Err(Box::new(err))).map_err(|_| format_err!(""))
-                        }
+                        Sender::SenderMPSC(sender) => sender
+                            .send(Err(format_err!(err)))
+                            .map_err(|_| format_err!("")),
+                        Sender::SenderOneS(sender) => sender
+                            .send(Err(format_err!(err)))
+                            .map_err(|_| format_err!("")),
                     }
                     .is_err()
                     {
@@ -712,7 +693,7 @@ impl DragoonNetwork {
                 });
             }
             DragoonCommand::Bootstrap { sender } => {
-                let res = self.bootstrap().await.map_err(|err| err.into());
+                let res = self.bootstrap().await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -743,10 +724,7 @@ impl DragoonNetwork {
                 sender,
             } => self.get_blocks_info_from(peer_id, file_hash, sender),
             DragoonCommand::GetBlockList { file_hash, sender } => {
-                let res = self
-                    .get_block_list(file_hash)
-                    .await
-                    .map_err(|err| err.into());
+                let res = self.get_block_list(file_hash).await;
 
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -768,8 +746,7 @@ impl DragoonNetwork {
                     &block_hashes,
                     output_filename,
                 )
-                .await
-                .map_err(|err| err.into());
+                .await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -797,8 +774,7 @@ impl DragoonNetwork {
                         encode_mat_n,
                         powers_path,
                     )
-                    .await
-                    .map_err(|err| err.into());
+                    .await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -954,9 +930,7 @@ impl DragoonNetwork {
         };
         //TODO this needs to be handled differently to return the provider stream to go faster
         //TODO change this to be spawned inside a new task to not have to wait for all the providers to be received to start asking info
-        let provider_list = get_prov_recv
-            .await?
-            .map_err(|e| -> anyhow::Error { format_err!("{}", e) })?;
+        let provider_list = get_prov_recv.await??;
         debug!(
             "Got provider list for file {}: {:?}",
             file_hash, provider_list
@@ -975,9 +949,7 @@ impl DragoonNetwork {
             error!(err_msg);
             return Err(format_err!(err_msg));
         };
-        let block_dir = block_dir_recv
-            .await?
-            .map_err(|e| -> anyhow::Error { format_err!("{}", e) })?;
+        let block_dir = block_dir_recv.await??;
         debug!("Will write the blocks in {:?}", block_dir);
         //TODO create the block directory recursively
         tokio::fs::create_dir_all(&block_dir).await?;
@@ -997,9 +969,7 @@ impl DragoonNetwork {
             error!(err_msg);
             return Err(format_err!(err_msg));
         };
-        let file_dir = get_file_dir_recv
-            .await?
-            .map_err(|e| -> anyhow::Error { format_err!("{}", e) })?;
+        let file_dir = get_file_dir_recv.await??;
         debug!("Will write the file in {:?}", file_dir);
 
         let (info_sender, mut info_receiver) = mpsc::unbounded_channel();
@@ -1142,8 +1112,7 @@ impl DragoonNetwork {
             .behaviour_mut()
             .kademlia
             .get_providers(key.into_bytes().into());
-        let (m_sender, mut m_receiver) =
-            mpsc::unbounded_channel::<Result<HashSet<PeerId>, Box<dyn Error + Send>>>();
+        let (m_sender, mut m_receiver) = mpsc::unbounded_channel::<Result<HashSet<PeerId>>>();
         self.pending_get_providers.insert(query_id, m_sender);
         let providers = async_stream::stream! {
             let mut current_providers: HashSet<PeerId> = Default::default();
