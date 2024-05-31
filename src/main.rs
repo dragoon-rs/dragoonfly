@@ -1,19 +1,19 @@
 mod app;
 mod commands;
-mod dragoon;
 mod dragoon_network;
 mod error;
+mod peer_block_info;
 mod to_serialize;
 
 use axum::routing::get;
 use axum::Router;
-use futures::channel::mpsc;
 use libp2p::identity;
 use libp2p::identity::Keypair;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
+use tokio::sync::mpsc;
 use tracing::info;
 
 use ark_bls12_381::{Fr, G1Projective};
@@ -25,7 +25,7 @@ use crate::dragoon_network::DragoonNetwork;
 pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
-    let (cmd_sender, cmd_receiver) = mpsc::channel(0);
+    let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
 
     let router = Router::new()
         .route("/listen/:addr", get(commands::create_cmd_listen))
@@ -54,14 +54,10 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
             get(commands::create_cmd_get_providers),
         )
         .route("/bootstrap", get(commands::create_cmd_bootstrap))
-        .route("/dragoon/peers", get(commands::create_cmd_dragoon_peers))
-        .route(
-            "/dragoon/send/:peer/:block_hash/:block_path",
-            get(commands::create_cmd_dragoon_send),
-        )
+        // .route("/dragoon/peers", get(commands::create_cmd_dragoon_peers))
         // .route(
-        //     "/dragoon/get/:peer/:key",
-        //     get(commands::create_cmd_dragoon_get),
+        //     "/dragoon/send/:peer/:block_hash/:block_path",
+        //     get(commands::create_cmd_dragoon_send),
         // )
         .route(
             "/decode-blocks/:block-dir/:block_hashes/:output_filename",
@@ -71,9 +67,13 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
             "/encode-file/:file_path/:replace-blocks/:encoding-method/:encode_mat_k/:encode_mat_n/:powers_path",
             get(commands::create_cmd_encode_file),
         )
-        .route("/get-block-from/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_get_block_from));
+        .route("/get-block-from/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_get_block_from))
+        .route("/get-file/:file_hash/:output_filename/:powers_path", get(commands::create_cmd_get_file))
+        .route("/get-block-list/:file_hash", get(commands::create_cmd_get_block_list))
+        .route("/get-blocks-info-from/:peer_id_base_58/:file_hash", get(commands::create_cmd_get_blocks_info_from))
+        .route("/node-info", get(commands::create_cmd_node_info));
 
-    let router = router.with_state(Arc::new(app::AppState::new(cmd_sender)));
+    let router = router.with_state(Arc::new(app::AppState::new(cmd_sender.clone())));
 
     let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {
         ip_port
@@ -97,9 +97,9 @@ pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
     info!("IP/port: {}", ip_port);
     info!("Peer ID: {} ({})", peer_id, id);
 
-    let swarm = dragoon_network::create_swarm::<Fr, G1Projective>(kp).await?;
-    let network = DragoonNetwork::new(swarm, cmd_receiver, peer_id, true);
-    tokio::spawn(network.run::<DensePolynomial<Fr>>());
+    let swarm = dragoon_network::create_swarm(kp).await?;
+    let network = DragoonNetwork::new(swarm, cmd_receiver, cmd_sender, peer_id, true);
+    tokio::spawn(network.run::<Fr, G1Projective, DensePolynomial<Fr>>());
 
     let shutdown = signal::ctrl_c();
     tokio::select! {

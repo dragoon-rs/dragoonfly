@@ -144,14 +144,6 @@ export def bootstrap [
     "bootstrap" | run-command $node
 }
 
-export def get-file [
-    key: string,
-    --node: string = $DEFAULT_IP
-]: nothing -> any {
-    log debug $"getting content of ($key) from ($node)"
-    $"get-file/($key)" | run-command $node
-}
-
 export def add-file [
     key: string,
     content: string,
@@ -195,9 +187,44 @@ export def get-block-from [
     --node: string = $DEFAULT_IP
 ] nothing -> any {
     log debug $"get block ($block_hash) part of file ($file_hash) from peer ($peer_id_base_58)"
-    $"get-block-from/($peer_id_base_58)/($file_hash)/($block_hash)" | run-command $node | bytes from_int
+    $"get-block-from/($peer_id_base_58)/($file_hash)/($block_hash)" | run-command $node | get block_data | bytes from_int
 }
 
 def "slash replace" [] string -> string {
     $in | str replace --all '/' '%2F'
+}
+
+export def get-file [
+    file_hash: string,
+    output_filename: string,
+    --powers_path: string = $POWERS_PATH,
+    --node: string = $DEFAULT_IP,
+] nothing -> any {
+    log debug $"Getting file ($file_hash)"
+    $"get-file/($file_hash)/($output_filename)/($powers_path | slash replace)" | run-command $node
+
+}
+
+export def get-blocks-info-from [
+    peer_id_base_58: string,
+    filename: string,
+    --node: string = $DEFAULT_IP,
+] nothing -> any {
+    log debug $"Getting the list of blocks from ($peer_id_base_58) for file ($filename)"
+    $"get-blocks-info-from/($peer_id_base_58)/($filename)" | run-command $node
+}
+
+export def get-block-list [
+    filename: string,
+    --node: string = $DEFAULT_IP,
+] nothing -> any {
+    log debug $"Getting the list of blocks for file ($filename) from own node"
+    $"get-block-list/($filename)" | run-command $node
+}
+
+export def node-info [
+    --node: string = $DEFAULT_IP,
+] nothing -> any {
+    log debug $"Getting the info from node ($node)"
+    $"node-info" | run-command $node
 }

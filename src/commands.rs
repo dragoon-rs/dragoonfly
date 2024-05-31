@@ -3,18 +3,22 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use futures::channel::oneshot::{self, Canceled};
-use futures::SinkExt;
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::error::Error;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::{
+    mpsc,
+    oneshot::{self, error::RecvError},
+};
 use tracing::{error, info};
 
 use crate::app::AppState;
+use crate::dragoon_network::BlockResponse;
 use crate::error::DragoonError;
+use crate::peer_block_info::PeerBlockInfo;
 use crate::to_serialize::{ConvertSer, JsonWrapper};
 
 // use komodo::linalg::Matrix;
@@ -41,7 +45,14 @@ pub(crate) enum EncodingMethod {
 //
 // - behaviour
 
-pub(crate) type Sender<T> = oneshot::Sender<Result<T, Box<dyn Error + Send>>>;
+pub(crate) type SenderOneS<T> = oneshot::Sender<Result<T, Box<dyn Error + Send>>>;
+pub(crate) type SenderMPSC<T> = mpsc::UnboundedSender<Result<T, Box<dyn Error + Send>>>;
+
+#[derive(Debug)]
+pub(crate) enum Sender<T> {
+    SenderOneS(SenderOneS<T>),
+    SenderMPSC(SenderMPSC<T>),
+}
 
 #[derive(Debug)]
 pub(crate) enum DragoonCommand {
@@ -62,15 +73,15 @@ pub(crate) enum DragoonCommand {
         multiaddr: String,
         sender: Sender<()>,
     },
-    DragoonPeers {
-        sender: Sender<HashSet<PeerId>>,
-    },
-    DragoonSend {
-        block_hash: String,
-        block_path: String,
-        peerid: String,
-        sender: Sender<()>,
-    },
+    // DragoonPeers {
+    //     sender: Sender<HashSet<PeerId>>,
+    // },
+    // DragoonSend {
+    //     block_hash: String,
+    //     block_path: String,
+    //     peerid: String,
+    //     sender: Sender<()>,
+    // },
     EncodeFile {
         file_path: String,
         replace_blocks: bool,
@@ -80,14 +91,37 @@ pub(crate) enum DragoonCommand {
         powers_path: String,
         sender: Sender<(String, String)>,
     },
+    GetBlockDir {
+        file_hash: String,
+        sender: Sender<PathBuf>,
+    },
     GetBlockFrom {
         peer_id: PeerId,
         file_hash: String,
         block_hash: String,
-        sender: Sender<Vec<u8>>,
+        sender: Sender<BlockResponse>,
+    },
+    GetBlocksInfoFrom {
+        peer_id: PeerId,
+        file_hash: String,
+        sender: Sender<PeerBlockInfo>,
+    },
+    GetBlockList {
+        file_hash: String,
+        sender: Sender<Vec<String>>,
     },
     GetConnectedPeers {
         sender: Sender<Vec<PeerId>>,
+    },
+    GetFile {
+        file_hash: String,
+        output_filename: String,
+        powers_path: String,
+        sender: Sender<PathBuf>,
+    },
+    GetFileDir {
+        file_hash: String,
+        sender: Sender<PathBuf>,
     },
     GetListeners {
         sender: Sender<Vec<Multiaddr>>,
@@ -106,6 +140,9 @@ pub(crate) enum DragoonCommand {
         multiaddr: String,
         sender: Sender<u64>,
     },
+    NodeInfo {
+        sender: Sender<PeerId>,
+    },
     RemoveListener {
         listener_id: u64,
         sender: Sender<bool>,
@@ -123,16 +160,22 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             DragoonCommand::DecodeBlocks { .. } => write!(f, "decode-blocks"),
             DragoonCommand::Dial { .. } => write!(f, "dial"),
-            DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
-            DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
+            // DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
+            // DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
             DragoonCommand::EncodeFile { .. } => write!(f, "encode-file"),
+            DragoonCommand::GetBlockDir { .. } => write!(f, "get-block-dir"),
             DragoonCommand::GetBlockFrom { .. } => write!(f, "get-block-from"),
+            DragoonCommand::GetBlocksInfoFrom { .. } => write!(f, "get-blocks-info-from"),
+            DragoonCommand::GetBlockList { .. } => write!(f, "get-block-list"),
             DragoonCommand::GetConnectedPeers { .. } => write!(f, "get-connected-peers"),
+            DragoonCommand::GetFile { .. } => write!(f, "get-file"),
+            DragoonCommand::GetFileDir { .. } => write!(f, "get-file-dir"),
             DragoonCommand::GetListeners { .. } => write!(f, "get-listener"),
             DragoonCommand::GetPeerId { .. } => write!(f, "get-peer-id"),
             DragoonCommand::GetNetworkInfo { .. } => write!(f, "get-network-info"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Listen { .. } => write!(f, "listen"),
+            DragoonCommand::NodeInfo { .. } => write!(f, "node-info"),
             DragoonCommand::RemoveListener { .. } => write!(f, "remove-listener"),
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
         }
@@ -171,6 +214,8 @@ macro_rules! dragoon_command {
          => {
         {
         let (sender, receiver) = oneshot::channel(); // create a channel
+
+        let sender = Sender::SenderOneS(sender);
 
         let cmd = DragoonCommand::$variant {$($variant_args,)* sender}; // build the command
         // for example, when calling `dragoon_command!(state, Listen, multiaddr)` the expanded result will be:
@@ -226,18 +271,18 @@ pub(crate) async fn create_cmd_dial(
     dragoon_command!(state, Dial, multiaddr)
 }
 
-pub(crate) async fn create_cmd_dragoon_peers(State(state): State<Arc<AppState>>) -> Response {
-    info!("running command `dragoon_peers`");
-    dragoon_command!(state, DragoonPeers)
-}
+// pub(crate) async fn create_cmd_dragoon_peers(State(state): State<Arc<AppState>>) -> Response {
+//     info!("running command `dragoon_peers`");
+//     dragoon_command!(state, DragoonPeers)
+// }
 
-pub(crate) async fn create_cmd_dragoon_send(
-    Path((peerid, block_hash, block_path)): Path<(String, String, String)>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    info!("running command `dragoon_send`");
-    dragoon_command!(state, DragoonSend, block_hash, block_path, peerid)
-}
+// pub(crate) async fn create_cmd_dragoon_send(
+//     Path((peerid, block_hash, block_path)): Path<(String, String, String)>,
+//     State(state): State<Arc<AppState>>,
+// ) -> Response {
+//     info!("running command `dragoon_send`");
+//     dragoon_command!(state, DragoonSend, block_hash, block_path, peerid)
+// }
 
 pub(crate) async fn create_cmd_encode_file(
     Path((file_path, replace_blocks, encoding_method, encode_mat_k, encode_mat_n, powers_path)): Path<(String, bool, EncodingMethod, usize, usize, String)>,
@@ -260,15 +305,41 @@ pub(crate) async fn create_cmd_get_block_from(
     Path((peer_id_base_58, file_hash, block_hash)): Path<(String, String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    info!("running command `get_from_from`");
+    info!("running command `get_block_from`");
     let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
     let peer_id = PeerId::from_bytes(&bytes).unwrap();
     dragoon_command!(state, GetBlockFrom, peer_id, file_hash, block_hash)
 }
 
+pub(crate) async fn create_cmd_get_blocks_info_from(
+    Path((peer_id_base_58, file_hash)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `get_blocks_info_from`");
+    let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
+    let peer_id = PeerId::from_bytes(&bytes).unwrap();
+    dragoon_command!(state, GetBlocksInfoFrom, peer_id, file_hash)
+}
+
+pub(crate) async fn create_cmd_get_block_list(
+    Path(file_hash): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `get_block_list");
+    dragoon_command!(state, GetBlockList, file_hash)
+}
+
 pub(crate) async fn create_cmd_get_connected_peers(State(state): State<Arc<AppState>>) -> Response {
     info!("running command `get_connected_peers`");
     dragoon_command!(state, GetConnectedPeers)
+}
+
+pub(crate) async fn create_cmd_get_file(
+    Path((file_hash, output_filename, powers_path)): Path<(String, String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command get_file");
+    dragoon_command!(state, GetFile, file_hash, output_filename, powers_path)
 }
 
 pub(crate) async fn create_cmd_get_listeners(State(state): State<Arc<AppState>>) -> Response {
@@ -331,6 +402,11 @@ pub(crate) async fn create_cmd_listen(
     dragoon_command!(state, Listen, multiaddr)
 }
 
+pub(crate) async fn create_cmd_node_info(State(state): State<Arc<AppState>>) -> Response {
+    info!("running command `node_info`");
+    dragoon_command!(state, NodeInfo)
+}
+
 pub(crate) async fn create_cmd_remove_listener(
     Path(listener_id): Path<u64>,
     State(state): State<Arc<AppState>>,
@@ -350,10 +426,12 @@ pub(crate) async fn create_cmd_start_provide(
 // End of dragoon command implementation
 
 fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {
-    format!("Got error from command `{}`: {}", command, err).into_response()
+    let err_msg = format!("Got error from command `{}`: {}", command, err);
+    error!(err_msg);
+    DragoonError::UnexpectedError(err_msg).into_response()
 }
 
-fn handle_canceled(err: Canceled, command: &str) -> Response {
+fn handle_canceled(err: RecvError, command: &str) -> Response {
     error!(
         "Could not receive a return from command `{}`: {:?}",
         command, err
@@ -362,13 +440,13 @@ fn handle_canceled(err: Canceled, command: &str) -> Response {
 }
 
 async fn send_command(command: DragoonCommand, state: Arc<AppState>) -> Option<Response> {
-    let mut cmd_sender = state.sender.lock().await;
+    let cmd_sender = state.cmd_sender.clone();
 
     let cmd_name = format!("{}", command);
 
     info!("Sending command `{:?}`", command);
 
-    if let Err(e) = cmd_sender.send(command).await {
+    if let Err(e) = cmd_sender.send(command) {
         let err = format!("Could not send command `{}`: {:?}", cmd_name, e);
         error!(err);
         return Some(DragoonError::UnexpectedError(err).into_response());
