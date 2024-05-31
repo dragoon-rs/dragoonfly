@@ -1,11 +1,10 @@
 use ../swarm.nu *
 use ../app.nu
 use std assert
+use help_func/exit_func.nu exit_on_error
 
 # define variables
 let SWARM = swarm create 2
-let record_name = "tata"
-let message = "it works at least"
 let sleep_duration = 5sec
 mut node_is_setup = false
 let output_dir: path = "/tmp/dragoon_test/received_blocks"
@@ -67,45 +66,50 @@ try {
     let block_hashes = $encode_res.1 | from json  #! This is a string not a list, need to convert
     let file_hash = $encode_res.0
 
-    print $"The file got cut into blocks, block hashes are: ($block_hashes)"
+    print $"The file got cut into blocks, block hashes are"
+    print $block_hashes
     print $"The hash of the file is: ($file_hash)"
 
-    print "\nNode 0 starts providing the blocks"
-    for $hash in $block_hashes {
-        print $"Node 0 starts providing the block with hash ($hash)"
-        app start-provide --node $SWARM.0.ip_port $hash
-    }
-    print "Node 0 finished announcing which blocks it provides\n"
+    print "\nNode 0 starts providing the file"
+    app start-provide --node $SWARM.0.ip_port $file_hash
 
-    print "Node 1 starts searching for the providers with the hashes of the blocks"
-    mut providers = []
-    for $hash in $block_hashes {
-        print $"Node 1 searching for the provider of the block with hash ($hash)"
-        $providers = ($providers | append (app get-providers --node $SWARM.1.ip_port $hash | get 0))
-    }
-    print "Node 1 finished searching for the providers\n"
+    print $"\nSleeping for ($sleep_duration) to ensure the start provide finished"
+    sleep $sleep_duration
+    print "Resuming execution\n"
+
+    print "Node 1 starts searching for the providers with the file hash"
+    let provider = app get-providers --node $SWARM.1.ip_port $file_hash | get 0
     print $"The providers are:"
-    print $providers
+    print $provider
+
+    print "\nNode 1 asks node 0 to provide the list of blocks it has for the file"
+    let received_block_list = app get-blocks-info-from --node $SWARM.1.ip_port $provider $file_hash | get block_hashes
+    print $"The blocks node 0 has are:"
+    print $received_block_list
+
+    print "\nComparing to the actual block list:"
+    assert equal ($block_hashes |sort) ($received_block_list |sort)
+    print "Passed ! Block lists are the same"
 
     print "Creating the directory to receive the files"
     mkdir $output_dir
 
     print "\nNode 1 asks for the blocks to node 0"
-    for $i in 0..<($block_hashes | length) {
-        let $hash = $block_hashes | get $i
+    for $i in 0..<($received_block_list | length) {
+        let $hash = $received_block_list | get $i
         print $"Getting block ($hash)"
-        app get-block-from --node $SWARM.1.ip_port ($providers | get $i) $file_hash ($hash) | save $"($output_dir)/($hash)"
+        app get-block-from --node $SWARM.1.ip_port $provider $file_hash ($hash) | save $"($output_dir)/($hash)"
     }
     print "Finished getting all the blocks\n"
     
     print "Node 1 reconstructs the file with the blocks"
-    app decode-blocks --node $SWARM.1.ip_port $output_dir $block_hashes $res_filename
+    app decode-blocks --node $SWARM.1.ip_port $output_dir $received_block_list $res_filename
 
     print "Killing the swarm"
     swarm kill --no-shell
 
     print "Checking the difference between the original and reconstructed file"
-    let difference = diff $"($output_dir)/../($res_filename)" $test_file
+    let difference = {diff $"($output_dir)/../($res_filename)" $test_file} | exit_on_error | get stdout
     if $difference == "" {
         print "Test successful !"
     } else {
@@ -113,8 +117,8 @@ try {
         error make {msg: "Exit to catch"}
     }
 
-} catch {
+} catch { |e|
     print "Killing the swarm"
     swarm kill --no-shell
-    error make {msg: "Test failed"}
+    error make {msg: $"Test failed: ($e)"}
 }

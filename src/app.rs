@@ -1,16 +1,13 @@
-use futures::channel::mpsc::Sender;
-use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::commands::DragoonCommand;
 
 pub(crate) struct AppState {
-    pub sender: Mutex<Sender<DragoonCommand>>,
+    pub cmd_sender: UnboundedSender<DragoonCommand>,
 }
 
 impl AppState {
-    pub fn new(sender: Sender<DragoonCommand>) -> Self {
-        AppState {
-            sender: Mutex::new(sender),
-        }
+    pub fn new(cmd_sender: UnboundedSender<DragoonCommand>) -> Self {
+        AppState { cmd_sender }
     }
 }
