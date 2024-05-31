@@ -1,12 +1,12 @@
 //! Define all the commands that can be used by the network
 
+use anyhow::{self, Result};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
-use std::error::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{
@@ -45,8 +45,8 @@ pub(crate) enum EncodingMethod {
 //
 // - behaviour
 
-pub(crate) type SenderOneS<T> = oneshot::Sender<Result<T, Box<dyn Error + Send>>>;
-pub(crate) type SenderMPSC<T> = mpsc::UnboundedSender<Result<T, Box<dyn Error + Send>>>;
+pub(crate) type SenderOneS<T> = oneshot::Sender<Result<T>>;
+pub(crate) type SenderMPSC<T> = mpsc::UnboundedSender<Result<T>>;
 
 #[derive(Debug)]
 pub(crate) enum Sender<T> {
@@ -183,7 +183,7 @@ impl std::fmt::Display for DragoonCommand {
 }
 
 async fn command_res_match(
-    receiver: oneshot::Receiver<Result<impl ConvertSer, Box<dyn Error + Send>>>,
+    receiver: oneshot::Receiver<Result<impl ConvertSer>>,
     cmd_name: String,
 ) -> Response {
     match receiver.await {
@@ -425,7 +425,7 @@ pub(crate) async fn create_cmd_start_provide(
 
 // End of dragoon command implementation
 
-fn handle_dragoon_error(err: Box<dyn Error + Send>, command: &str) -> Response {
+fn handle_dragoon_error(err: anyhow::Error, command: &str) -> Response {
     let err_msg = format!("Got error from command `{}`: {}", command, err);
     error!(err_msg);
     DragoonError::UnexpectedError(err_msg).into_response()

@@ -9,12 +9,13 @@ use axum::routing::get;
 use axum::Router;
 use libp2p::identity;
 use libp2p::identity::Keypair;
-use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::info;
+
+use anyhow::Result;
 
 use ark_bls12_381::{Fr, G1Projective};
 use ark_poly::univariate::DensePolynomial;
@@ -22,7 +23,7 @@ use ark_poly::univariate::DensePolynomial;
 use crate::dragoon_network::DragoonNetwork;
 
 #[tokio::main]
-pub(crate) async fn main() -> Result<(), Box<dyn Error>> {
+pub(crate) async fn main() -> Result<()> {
     tracing_subscriber::fmt::try_init().expect("cannot init logger");
 
     let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
