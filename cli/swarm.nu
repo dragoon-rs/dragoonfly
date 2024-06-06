@@ -17,7 +17,7 @@ export def "swarm run" [
     swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to run
     --features: list<string> = [], # features to include in the nodes
     --no-shell
-]: nothing -> nothing {
+]: nothing -> string {
     if ($swarm | is-empty) {
         error make --unspanned {
             msg: "`swarm create` requires a non empty swarm"
@@ -45,13 +45,13 @@ export def "swarm run" [
        $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
        $env.NU_LOG_LEVEL = "DEBUG"
        $env.SWARM_LOG_DIR = ($log_dir)
-       use app.nu
-       use swarm.nu ["swarm kill", "swarm list", "swarm log", "bytes decode"]
+       use cli/app.nu
+       use cli/swarm.nu ["swarm kill", "swarm list", "swarm log", "bytes decode"]
        const SWARM = ($swarm | to nuon)
     '
     }
 
-    null
+    $log_dir
 }
 
 # list the nodes of the swarm

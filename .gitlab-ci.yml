@@ -1,4 +1,4 @@
-image: "gitlab-registry.isae-supaero.fr/j.detchart/dragoonfly"
+image: "rust:latest"
 
 stages:
   - fmt
@@ -58,4 +58,5 @@ test:
     - echo "http_proxy = ${http_proxy}" 
     - echo "HTTPS_PROXY = ${HTTPS_PROXY}"
     - echo "https_proxy = ${https_proxy}"
+    - export RUST_LOG=ERROR
     - make test

@@ -1,6 +1,7 @@
 use anyhow::{self, format_err, Result};
 use futures::prelude::*;
 use futures::stream::BoxStream;
+use libp2p::core::ConnectedPoint;
 use tokio::fs as tfs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot};
@@ -125,6 +126,7 @@ pub(crate) struct DragoonNetwork {
     command_sender: mpsc::UnboundedSender<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
     file_dir: PathBuf,
+    pending_dial: HashMap<String, Sender<()>>,
     pending_start_providing: HashMap<kad::QueryId, Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, SenderMPSC<HashSet<PeerId>>>,
     pending_request_block_info: HashMap<OutboundRequestId, Sender<PeerBlockInfo>>,
@@ -148,6 +150,7 @@ impl DragoonNetwork {
             command_sender,
             listeners: HashMap::new(),
             file_dir: Self::create_block_dir(peer_id, replace).unwrap(),
+            pending_dial: Default::default(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
             pending_request_block_info: Default::default(),
@@ -388,6 +391,35 @@ impl DragoonNetwork {
                     }
                 }
             }
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => match endpoint {
+                ConnectedPoint::Dialer { address, .. } => {
+                    if let Some(sender) = self.pending_dial.remove(&address.to_string()) {
+                        if match sender {
+                            Sender::SenderMPSC(sender) => {
+                                sender.send(Ok(())).map_err(|_| format_err!(""))
+                            }
+                            Sender::SenderOneS(sender) => {
+                                sender.send(Ok(())).map_err(|_| format_err!(""))
+                            }
+                        }
+                        .is_err()
+                        {
+                            error!("Couldn't send the result of the dial operation to the peer of multiaddr {}", address);
+                        }
+                    } else {
+                        error!(
+                                "Could no find the sender associated with the multiaddr dial {} for the dial response (this might be due to a double dial attempt to the same node)",
+                                address
+                            );
+                    }
+                }
+                ConnectedPoint::Listener { .. } => debug!(
+                    "The node with peer id {:?} established a connection with us",
+                    peer_id
+                ),
+            },
             e => warn!("[unknown event] {:?}", e),
         }
     }
@@ -621,16 +653,89 @@ impl DragoonNetwork {
                     }
                 });
             }
-            DragoonCommand::Dial { multiaddr, sender } => {
-                let res = self.dial(multiaddr).await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
+            DragoonCommand::DialSingle { multiaddr, sender } => {
+                if !self.pending_dial.contains_key(&multiaddr) {
+                    let res = self.dial(multiaddr.clone()).await;
+                    if res.is_err() {
+                        if match sender {
+                            Sender::SenderMPSC(sender) => {
+                                sender.send(res).map_err(|_| format_err!(""))
+                            }
+                            Sender::SenderOneS(sender) => {
+                                sender.send(res).map_err(|_| format_err!(""))
+                            }
+                        }
+                        .is_err()
+                        {
+                            error!("Could not send the error result of the dial operation")
+                        }
+                    } else {
+                        // need to check again even though we already did, because there was an await inbetween (and thus a potential modification of the hash_map)
+                        if let std::collections::hash_map::Entry::Vacant(e) =
+                            self.pending_dial.entry(multiaddr.clone())
+                        {
+                            e.insert(sender);
+                        } else {
+                            error!("Another dial attempt to {} modified the list of pending dial while waiting for this dial to complete", multiaddr)
+                        }
+                    }
+                } else {
+                    warn!("Tried to double dial on multiaddr {}", multiaddr);
                 }
-                .is_err()
-                {
-                    error!("Could not send the result of the dial operation")
+            }
+            DragoonCommand::DialMultiple {
+                list_multiaddr,
+                sender,
+            } => {
+                let (dial_send, mut dial_recv) = mpsc::unbounded_channel();
+                for multiaddr in list_multiaddr {
+                    let sender = dial_send.clone();
+                    let cmd_sender = self.command_sender.clone();
+                    if cmd_sender
+                        .send(DragoonCommand::DialSingle {
+                            multiaddr: multiaddr.clone(),
+                            sender: Sender::SenderMPSC(sender),
+                        })
+                        .is_err()
+                    {
+                        error!(
+                            "Could not send the dial command for the multiaddr {}",
+                            multiaddr
+                        );
+                    }
                 }
+                tokio::spawn(async move {
+                    let mut err_list = vec![];
+                    while let Some(res) = dial_recv.recv().await {
+                        if res.is_err() {
+                            err_list.push(res);
+                        }
+                    }
+                    let final_res = match err_list[..] {
+                        [] => Ok(()),
+                        _ => Err(format_err!(
+                            "Dial to all supplied multiaddr failed, got the following errors: {:?}",
+                            err_list
+                        )),
+                    };
+                    // making the error msg first to not have to clone to prevent borrowed value move
+                    let err_msg = format!(
+                        "Could not send the result of the dial_multiple operation: {:?}",
+                        final_res
+                    );
+                    if match sender {
+                        Sender::SenderMPSC(sender) => {
+                            sender.send(final_res).map_err(|_| format_err!(""))
+                        }
+                        Sender::SenderOneS(sender) => {
+                            sender.send(final_res).map_err(|_| format_err!(""))
+                        }
+                    }
+                    .is_err()
+                    {
+                        error!(err_msg);
+                    }
+                });
             }
             DragoonCommand::AddPeer { multiaddr, sender } => {
                 let res = self.add_peer(multiaddr).await;

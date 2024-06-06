@@ -44,7 +44,8 @@ pub(crate) async fn main() -> Result<()> {
             "/get-connected-peers",
             get(commands::create_cmd_get_connected_peers),
         )
-        .route("/dial/:addr", get(commands::create_cmd_dial))
+        .route("/dial-single/:addr", get(commands::create_cmd_dial_single))
+        .route("/dial-multiple/:list_addr", get(commands::create_cmd_dial_multiple))
         .route("/add-peer/:addr", get(commands::create_cmd_add_peer))
         .route(
             "/start-provide/:key",
