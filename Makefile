@@ -15,6 +15,7 @@ clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 test:
+	nu tests/test_network_builder.nu
 	nu tests/message_exchange_block_per_block.nu
 	nu tests/get_file_2_peers.nu
 	nu tests/get_file_4_peers_min_blocks.nu

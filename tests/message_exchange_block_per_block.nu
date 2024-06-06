@@ -1,64 +1,23 @@
-use ../swarm.nu *
-use ../app.nu
+use ../cli/swarm.nu *
+use ../cli/app.nu
+use ../cli/network_builder.nu *
 use std assert
 use help_func/exit_func.nu exit_on_error
 
 # define variables
-let SWARM = swarm create 2
-let sleep_duration = 5sec
-mut node_is_setup = false
 let output_dir: path = "/tmp/dragoon_test/received_blocks"
 let test_file: path = "tests/assets/dragoon_32/dragoon_32x32.png"
 let res_filename = "reconstructed_file.png"
 
-# create the nodes
-swarm run --no-shell $SWARM
+const connection_list = [
+    [1], 
+    [0],
+    ]
+
+# create the network topology
+let SWARM = build_network --no-shell $connection_list
 
 try {
-    print "Env var inside the script"
-    try {
-        print $'http_proxy: ($env.http_proxy)'
-    } catch {
-        print "http_proxy not set"
-    }
-
-    try { 
-        print $'HTTP_PROXY: ($env.HTTP_PROXY)' 
-    } catch {
-        print "HTTP_PROXY not set"
-    }
-
-    let original_time = date now
-
-    # make the node start to listen on their own ports
-    print "Trying to listen with node 0"
-    while not $node_is_setup {
-        # try to listen on node 0, this is to allow time for the ports to setup properly
-        try {
-            sleep 1sec
-            app listen --node $SWARM.0.ip_port $SWARM.0.multiaddr
-            print "Exiting the try-listen"
-            $node_is_setup = true
-        } catch {
-            let current_time = (date now)
-            let elapsed_time = $current_time - $original_time
-            print -n $"Failed to listen, elapsed_time: ($elapsed_time | format duration sec)\r"
-        }
-    }
-    print $"Successfully listening on node 0, took: ((date now) - $original_time | format duration sec)"
-    
-    # Node 1 doesn't need the same kind of setup as node 0, since it's only needed for the first node to do this
-    print "Trying to listen with node 1"
-    app listen --node $SWARM.1.ip_port $SWARM.1.multiaddr
-    print "Node 1 listening"
-
-    # connect the nodes
-    print "Node 0 dialing node 1"
-    app dial --node $SWARM.0.ip_port $SWARM.1.multiaddr
-
-    # a short sleep to ensure everything is setup properly
-    print $"Sleeping for ($sleep_duration)"
-    sleep $sleep_duration
 
     # Encode the file into blocks, put them to a directory named blocks next to the file
     print "Node 0 encodes the file into blocks"
@@ -72,10 +31,6 @@ try {
 
     print "\nNode 0 starts providing the file"
     app start-provide --node $SWARM.0.ip_port $file_hash
-
-    print $"\nSleeping for ($sleep_duration) to ensure the start provide finished"
-    sleep $sleep_duration
-    print "Resuming execution\n"
 
     print "Node 1 starts searching for the providers with the file hash"
     let provider = app get-providers --node $SWARM.1.ip_port $file_hash | get 0

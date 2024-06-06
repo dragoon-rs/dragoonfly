@@ -69,7 +69,11 @@ pub(crate) enum DragoonCommand {
         output_filename: String,
         sender: Sender<()>,
     },
-    Dial {
+    DialMultiple {
+        list_multiaddr: Vec<String>,
+        sender: Sender<()>,
+    },
+    DialSingle {
         multiaddr: String,
         sender: Sender<()>,
     },
@@ -159,7 +163,8 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::AddPeer { .. } => write!(f, "add-peer"),
             DragoonCommand::Bootstrap { .. } => write!(f, "bootstrap"),
             DragoonCommand::DecodeBlocks { .. } => write!(f, "decode-blocks"),
-            DragoonCommand::Dial { .. } => write!(f, "dial"),
+            DragoonCommand::DialMultiple { .. } => write!(f, "dial-multiple"),
+            DragoonCommand::DialSingle { .. } => write!(f, "dial-single"),
             // DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
             // DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
             DragoonCommand::EncodeFile { .. } => write!(f, "encode-file"),
@@ -263,12 +268,23 @@ pub(crate) async fn create_cmd_decode_blocks(
     )
 }
 
-pub(crate) async fn create_cmd_dial(
+pub(crate) async fn create_cmd_dial_multiple(
+    Path(list_multiaddr_json): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `dial-multiple`");
+    let list_multiaddr = serde_json::from_str(&list_multiaddr_json).expect(
+        "Could not parse user input as a valid list of mutliaddr when trying to dial multiple peers",
+    );
+    dragoon_command!(state, DialMultiple, list_multiaddr)
+}
+
+pub(crate) async fn create_cmd_dial_single(
     Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    info!("running command `dial`");
-    dragoon_command!(state, Dial, multiaddr)
+    info!("running command `dial-single`");
+    dragoon_command!(state, DialSingle, multiaddr)
 }
 
 // pub(crate) async fn create_cmd_dragoon_peers(State(state): State<Arc<AppState>>) -> Response {

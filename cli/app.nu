@@ -1,5 +1,5 @@
 use std log
-use komodo/binary.nu "bytes from_int"
+use ../komodo/binary.nu "bytes from_int"
 
 const HTTP = {
     OK: 200,
@@ -101,14 +101,24 @@ export def get-connected-peers [--node: string = $DEFAULT_IP]: nothing -> list<s
     "get-connected-peers" | run-command $node
 }
 
-export def dial [
+export def dial-single [
     multiaddr: string, # the multi-address to dial
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"dialing ($multiaddr) from ($node)"
     let multiaddr = $multiaddr | slash replace
 
-    $"dial/($multiaddr)" | run-command $node
+    $"dial-single/($multiaddr)" | run-command $node
+}
+
+export def dial-multiple [
+    list_multiaddr: list<string>, # all the multi-addresses to dial
+    --node: string = $DEFAULT_IP
+]: nothing -> string {
+    log debug $"dialing all the following multiaddr: ($list_multiaddr) from ($node)"
+    let list_multiaddr = $list_multiaddr | each {slash replace} | to json
+
+    $"dial-multiple/($list_multiaddr)" | run-command $node
 }
 
 export def add-peer [
