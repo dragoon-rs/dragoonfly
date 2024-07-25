@@ -236,5 +236,22 @@ export def node-info [
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
     log debug $"Getting the info from node ($node)"
-    $"node-info" | run-command $node
+    "node-info" | run-command $node
+}
+
+export def send-block-to [
+    peer_id_base_58: string,
+    file_hash: string,
+    block_hash: string,
+    --node: string = $DEFAULT_IP
+] nothing -> any {
+    log debug $"Sending block ($block_hash) part of file ($file_hash) to ($peer_id_base_58)"
+    $"send-block-to/($peer_id_base_58)/($file_hash)/($block_hash)" | run-command $node
+}
+
+export def get-available-storage [
+    --node: string = $DEFAULT_IP
+] nothing -> any {
+    log debug $"Getting the size left available for sending blocks from ($node)"
+    $"get-available-storage" | run-command $node
 }

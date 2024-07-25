@@ -2,6 +2,7 @@ use std log
 
 const NAME = "dragoonfly"
 const LOG_DIR = ($nu.temp-path | path join $NAME)
+const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
 
 # create a swarm table
 export def "swarm create" [n: int]: nothing -> table {
@@ -35,7 +36,7 @@ export def "swarm run" [
         log info $"launching node ($node.seed) \(($node.ip_port)\)"
         ^bash -c (
             $"cargo run --features '($features | str join ',')' "
-          + $"-- ($node.ip_port) ($node.seed) "
+          + $"-- ($POWERS_PATH) ($node.ip_port) ($node.seed) "
           + $"1> ($log_dir)/($node.seed).log 2> /dev/null &"
         )
     }

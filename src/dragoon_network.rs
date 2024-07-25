@@ -19,9 +19,16 @@ use libp2p::{
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
     tcp, yamux, PeerId, StreamProtocol, TransportError,
 };
+use libp2p_stream as stream;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs as sfs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
@@ -31,6 +38,7 @@ use crate::error::DragoonError::{
     NoParentDirectory, ProviderError,
 };
 use crate::peer_block_info::PeerBlockInfo;
+use crate::send_block_to::{self, SendBlockHandler};
 
 use komodo::{
     self,
@@ -48,8 +56,11 @@ use rs_merkle::{algorithms::Sha256, Hasher};
 use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
 use ark_poly::DenseUVPolynomial;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Compress, Validate};
+use ark_serialize::{CanonicalDeserialize, Compress, Validate};
 use ark_std::ops::Div;
+
+const SEND_BLOCK_PROTOCOL: StreamProtocol = StreamProtocol::new("/send-block/1.0.0");
+pub(crate) const SEND_BLOCK_FILE_NAME: &str = "send_block_list.txt";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BlockRequest {
@@ -100,6 +111,7 @@ pub(crate) async fn create_swarm(id_keys: Keypair) -> Result<Swarm<DragoonBehavi
                 [(StreamProtocol::new("/peer-info/1"), ProtocolSupport::Full)],
                 request_response::Config::default(),
             ),
+            send_block: stream::Behaviour::new(),
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60 * 60)))
         .build();
@@ -118,6 +130,7 @@ pub(crate) struct DragoonBehaviour {
     request_info: request_response::cbor::Behaviour<PeerBlockInfoRequest, PeerBlockInfoResponse>,
     identify: identify::Behaviour,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
+    send_block: stream::Behaviour,
 }
 
 pub(crate) struct DragoonNetwork {
@@ -126,14 +139,16 @@ pub(crate) struct DragoonNetwork {
     command_sender: mpsc::UnboundedSender<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
     file_dir: PathBuf,
+    powers_path: PathBuf,
+    current_available_storage_for_send: Arc<AtomicUsize>,
+    current_total_size_of_blocks_on_disk: Arc<AtomicUsize>,
     pending_dial: HashMap<String, Sender<()>>,
+    pending_send_block_to: HashSet<(PeerId, String)>,
     pending_start_providing: HashMap<kad::QueryId, Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, SenderMPSC<HashSet<PeerId>>>,
     pending_request_block_info: HashMap<OutboundRequestId, Sender<PeerBlockInfo>>,
     pending_request_block: HashMap<OutboundRequestId, Sender<BlockResponse>>,
     //TODO add a pending_request_file using the hash as a key
-    //TODO value should have a Sender<String> to return the result path and a SenderMPSC<FileCmdResult> which delivers
-    //TODO the result of the operations that GetFile from DragoonBehaviour asks of other modules (like kad and request_block / request_info)
 }
 
 impl DragoonNetwork {
@@ -141,6 +156,8 @@ impl DragoonNetwork {
         swarm: Swarm<DragoonBehaviour>,
         command_receiver: mpsc::UnboundedReceiver<DragoonCommand>,
         command_sender: mpsc::UnboundedSender<DragoonCommand>,
+        powers_path: PathBuf,
+        total_available_storage_for_send: usize,
         peer_id: PeerId,
         replace: bool,
     ) -> Self {
@@ -150,7 +167,13 @@ impl DragoonNetwork {
             command_sender,
             listeners: HashMap::new(),
             file_dir: Self::create_block_dir(peer_id, replace).unwrap(),
+            powers_path,
+            current_available_storage_for_send: Arc::new(AtomicUsize::new(
+                total_available_storage_for_send,
+            )),
+            current_total_size_of_blocks_on_disk: Arc::new(AtomicUsize::new(0)),
             pending_dial: Default::default(),
+            pending_send_block_to: Default::default(),
             pending_start_providing: Default::default(),
             pending_get_providers: Default::default(),
             pending_request_block_info: Default::default(),
@@ -164,14 +187,76 @@ impl DragoonNetwork {
             .resolve()
             .into_owned(); // * needs to be changed to allow taking the base path as argument from CLI
         if replace {
-            let _ = std::fs::remove_dir_all(&base_path); // ignore the error if the directory does not exist
+            let _ = sfs::remove_dir_all(&base_path); // ignore the error if the directory does not exist
         }
-        std::fs::create_dir_all(&base_path)?;
-        info!(
-            "Created the directory for node {} at {:?}",
-            peer_id, base_path
-        );
+        if sfs::metadata(&base_path).is_err() {
+            sfs::create_dir_all(&base_path)?;
+            info!(
+                "Created the directory for node {} at {:?}",
+                peer_id, base_path
+            );
+        } else {
+            warn!(
+                "Directory for the node {} already exists at {:?}, skipping creation of a new one",
+                peer_id, base_path
+            );
+        }
+
         Ok(base_path)
+    }
+
+    fn get_current_available_storage(&mut self) -> Result<(Arc<AtomicUsize>, Arc<AtomicUsize>)> {
+        let current_available_storage = self.current_available_storage_for_send.clone();
+        let total_block_size_on_disk = self.current_total_size_of_blocks_on_disk.clone();
+        let send_block_file_list: PathBuf =
+            [self.file_dir.clone(), PathBuf::from(SEND_BLOCK_FILE_NAME)]
+                .iter()
+                .collect();
+        fn create_new_send_list(mut file: sfs::File) {
+            file.write_all(format!("Total: {}\n", 0).as_bytes())
+                .unwrap();
+        }
+
+        match sfs::File::create_new(send_block_file_list.clone()) {
+            Ok(file) => create_new_send_list(file),
+            Err(_) => {
+                // * the file already exists
+                match BufReader::new(sfs::File::open(send_block_file_list.clone()).unwrap())
+                    .lines()
+                    .nth(0)
+                {
+                    Some(first_line) => {
+                        let first_line = first_line.unwrap();
+                        let re = regex::Regex::new(r"Total: ([0-9]*)$").unwrap();
+                        let already_used_size = re
+                            .captures(&first_line)
+                            .unwrap()
+                            .get(1)
+                            .unwrap()
+                            .as_str()
+                            .parse::<usize>()
+                            .unwrap();
+                        total_block_size_on_disk.store(already_used_size, Ordering::SeqCst);
+                        let total_size = current_available_storage.load(Ordering::SeqCst);
+                        match total_size.checked_sub(already_used_size) {
+                            Some(new_size) => {info!("The total available storage is {} after deducting the already used storage", new_size); current_available_storage.store(new_size, Ordering::SeqCst);},
+                            None => panic!("The total size allowed for send blocks is already smaller than the total size used by blocks received by send, that are currently stored on disk"),
+                        }
+                    }
+                    None => {
+                        // the file exists but for some reason we didn't find the first line
+                        // move the existing file to a .old to prevent erasing a file, then create a new one and write into it
+                        let mut new_path = send_block_file_list.clone();
+                        new_path.push(PathBuf::from(".old"));
+                        sfs::rename(send_block_file_list.clone(), new_path).unwrap();
+                        let file = sfs::File::create_new(send_block_file_list).unwrap();
+                        create_new_send_list(file)
+                    }
+                }
+            }
+        }
+
+        Ok((current_available_storage, total_block_size_on_disk))
     }
 
     pub async fn run<F, G, P>(mut self)
@@ -182,9 +267,34 @@ impl DragoonNetwork {
         for<'a, 'b> &'a P: Div<&'b P, Output = P>,
     {
         info!("Starting Dragoon Network");
+        let incoming_send_streams = self
+            .swarm
+            .behaviour()
+            .send_block
+            .new_control()
+            .accept(SEND_BLOCK_PROTOCOL)
+            .unwrap();
+        let (current_available_storage, total_block_size_on_disk) =
+            match self.get_current_available_storage() {
+                Ok(val) => val,
+                Err(e) => {
+                    error!("{:?}", e);
+                    panic!()
+                }
+            };
+
+        // starts a new task to handle the receiving end of sending blocks
+        SendBlockHandler::run::<F, G, P>(
+            incoming_send_streams,
+            self.powers_path.clone(),
+            self.file_dir.clone(),
+            current_available_storage,
+            total_block_size_on_disk,
+        )
+        .unwrap();
         loop {
             tokio::select! {
-                e = self.swarm.next() => self.handle_event::<F,G>(e.expect("Swarm stream to be infinite.")).await,
+                e = self.swarm.next() => self.handle_event(e.expect("Swarm stream to be infinite.")).await,
                 cmd = self.command_receiver.recv() =>  match cmd {
                     Some(c) => self.handle_command::<F,G,P>(c).await,
                     None => return,
@@ -267,11 +377,7 @@ impl DragoonNetwork {
         }
     }
 
-    async fn handle_event<F, G>(&mut self, event: SwarmEvent<DragoonBehaviourEvent>)
-    where
-        F: PrimeField,
-        G: CurveGroup<ScalarField = F>,
-    {
+    async fn handle_event(&mut self, event: SwarmEvent<DragoonBehaviourEvent>) {
         debug!("[event] {:?}", event);
         match event {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::Kademlia(
@@ -323,7 +429,7 @@ impl DragoonNetwork {
                 Message::Request {
                     request, channel, ..
                 } => {
-                    if let Err(e) = self.message_request::<F, G>(request, channel).await {
+                    if let Err(e) = self.message_request(request, channel).await {
                         error!("{}", e)
                     }
                 }
@@ -424,57 +530,28 @@ impl DragoonNetwork {
         }
     }
 
-    fn get_block_dir(&mut self, file_hash: String) -> PathBuf {
-        [self.get_file_dir(file_hash), PathBuf::from("blocks")]
-            .iter()
-            .collect()
+    fn read_block_from_disk(block_hash: String, block_dir: PathBuf) -> Result<Vec<u8>>
+where {
+        let ser_block = sfs::read(block_dir.join(block_hash))?;
+        Ok(ser_block)
     }
 
-    fn get_file_dir(&mut self, file_hash: String) -> PathBuf {
-        [self.file_dir.clone(), PathBuf::from(file_hash)]
-            .iter()
-            .collect()
-    }
-
-    fn read_block_from_disk<F, G>(block_hash: String, block_dir: PathBuf) -> Result<Vec<u8>>
-    where
-        F: PrimeField,
-        G: CurveGroup<ScalarField = F>,
-    {
-        let block = match fs::read_blocks::<F, G>(
-            &[block_hash],
-            &block_dir,
-            Compress::Yes,
-            Validate::Yes,
-        ) {
-            Ok(vec) => vec[0].clone().1,
-            Err(e) => return Err(e),
-        };
-        let mut buf = vec![0; block.serialized_size(Compress::Yes)];
-        block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
-        Ok(buf)
-    }
-
-    async fn message_request<F, G>(
+    async fn message_request(
         &mut self,
         request: BlockRequest,
         channel: ResponseChannel<BlockResponse>,
-    ) -> Result<()>
-    where
-        F: PrimeField,
-        G: CurveGroup<ScalarField = F>,
-    {
+    ) -> Result<()> {
         let BlockRequest {
             file_hash,
             block_hash,
         } = request;
-        let block_dir = self.get_block_dir(file_hash.clone());
+        let block_dir = get_block_dir(&self.file_dir.clone(), file_hash.clone());
         info!(
             "Searching blocks for the file {0} inside {1:?}",
             file_hash.clone(),
             block_dir
         );
-        let ser_block = Self::read_block_from_disk::<F, G>(block_hash.clone(), block_dir)?;
+        let ser_block = Self::read_block_from_disk(block_hash.clone(), block_dir)?;
         debug!(
             "Read block {0} for file {1}, got: {2:?}",
             block_hash, file_hash, ser_block
@@ -499,7 +576,7 @@ impl DragoonNetwork {
         channel: ResponseChannel<PeerBlockInfoResponse>,
     ) -> Result<()> {
         let PeerBlockInfoRequest { file_hash } = request;
-        let block_hashes = self.get_block_list(file_hash.clone()).await?;
+        let block_hashes = Self::get_block_list(self.file_dir.clone(), file_hash.clone()).await?;
         debug!(
             "A peer requested the blocks for file {}, node has : {:?}",
             file_hash, block_hashes
@@ -509,6 +586,7 @@ impl DragoonNetwork {
             peer_id_base_58: self.swarm.local_peer_id().to_base58(),
             file_hash: file_hash.clone(),
             block_hashes,
+            block_sizes: None,
         };
         self.swarm
             .behaviour_mut()
@@ -829,7 +907,7 @@ impl DragoonNetwork {
                 sender,
             } => self.get_blocks_info_from(peer_id, file_hash, sender),
             DragoonCommand::GetBlockList { file_hash, sender } => {
-                let res = self.get_block_list(file_hash).await;
+                let res = Self::get_block_list(self.file_dir.clone(), file_hash).await;
 
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -870,16 +948,16 @@ impl DragoonNetwork {
                 powers_path,
                 sender,
             } => {
-                let res = self
-                    .encode_file::<F, G, P>(
-                        file_path,
-                        replace_blocks,
-                        encoding_method,
-                        encode_mat_k,
-                        encode_mat_n,
-                        powers_path,
-                    )
-                    .await;
+                let res = Self::encode_file::<F, G, P>(
+                    self.file_dir.clone(),
+                    file_path,
+                    replace_blocks,
+                    encoding_method,
+                    encode_mat_k,
+                    encode_mat_n,
+                    powers_path,
+                )
+                .await;
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -890,7 +968,7 @@ impl DragoonNetwork {
                 }
             }
             DragoonCommand::GetBlockDir { file_hash, sender } => {
-                let res = Ok(self.get_block_dir(file_hash));
+                let res = Ok(get_block_dir(&self.file_dir.clone(), file_hash));
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -901,7 +979,7 @@ impl DragoonNetwork {
                 }
             }
             DragoonCommand::GetFileDir { file_hash, sender } => {
-                let res = Ok(self.get_file_dir(file_hash));
+                let res = Ok(get_file_dir(&self.file_dir.clone(), file_hash));
                 if match sender {
                     Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
                     Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
@@ -920,6 +998,73 @@ impl DragoonNetwork {
                 .is_err()
                 {
                     error!("Could not send the result of the node_info operation")
+                }
+            }
+            DragoonCommand::SendBlockTo {
+                peer_id,
+                file_hash,
+                block_hash,
+                sender,
+            } => {
+                // check if we are already trying to send this given block to this peer
+                if !self
+                    .pending_send_block_to
+                    .contains(&(peer_id, block_hash.clone()))
+                {
+                    self.pending_send_block_to
+                        .insert((peer_id, block_hash.clone()));
+                    self.send_block_to(peer_id, block_hash, file_hash, sender);
+                    //TODO remove the entry from the hash table once we are done, use a command ?
+                } else {
+                    let err = Err(format_err!(
+                        "The send block to {:?} for block {} is already being handled",
+                        peer_id,
+                        block_hash
+                    ));
+                    let err_msg = format!(
+                        "Could not send the error result of the send_block_to operation: {:?}",
+                        err
+                    );
+                    if match sender {
+                        Sender::SenderMPSC(sender) => sender.send(err).map_err(|_| format_err!("")),
+                        Sender::SenderOneS(sender) => sender.send(err).map_err(|_| format_err!("")),
+                    }
+                    .is_err()
+                    {
+                        error!(err_msg);
+                    }
+                }
+            }
+            DragoonCommand::RemoveEntryFromSendBlockToSet {
+                peer_id,
+                block_hash,
+                sender,
+            } => {
+                self.pending_send_block_to.remove(&(peer_id, block_hash));
+                if match sender {
+                    Sender::SenderMPSC(sender) => sender.send(Ok(())).map_err(|_| format_err!("")),
+                    Sender::SenderOneS(sender) => sender.send(Ok(())).map_err(|_| format_err!("")),
+                }
+                .is_err()
+                {
+                    error!("Could not send the result of the remove_entry_from_send_block_to_set operation")
+                }
+            }
+            DragoonCommand::GetAvailableStorage { sender } => {
+                let available_storage = self
+                    .current_available_storage_for_send
+                    .load(Ordering::Relaxed);
+                if match sender {
+                    Sender::SenderMPSC(sender) => sender
+                        .send(Ok(available_storage))
+                        .map_err(|_| format_err!("")),
+                    Sender::SenderOneS(sender) => sender
+                        .send(Ok(available_storage))
+                        .map_err(|_| format_err!("")),
+                }
+                .is_err()
+                {
+                    error!("Could not send the result of the get_available_storage operation")
                 }
             }
         }
@@ -1012,7 +1157,7 @@ impl DragoonNetwork {
         cmd_sender: mpsc::UnboundedSender<DragoonCommand>,
         file_hash: String,
         output_filename: String,
-        powers_path: String,
+        powers_path: PathBuf,
     ) -> Result<PathBuf>
     where
         F: PrimeField,
@@ -1101,7 +1246,7 @@ impl DragoonNetwork {
         //TODO change this to keep in memory other providers of the same block in case the first one fails (a hash map maybe ?)
         let mut already_request_block = vec![];
         let mut block_hashes_on_disk = vec![];
-        let powers = Self::get_powers(powers_path).await?;
+        let powers = get_powers(powers_path).await?;
         let mut number_of_blocks_written: u32 = 0;
 
         let (block_sender, mut block_receiver) = mpsc::unbounded_channel();
@@ -1114,7 +1259,7 @@ impl DragoonNetwork {
                             let response = response.map_err(|e| -> anyhow::Error {
                                 format_err!("Could not retrieve peer block block info: {}", e)
                             })?;
-                            let PeerBlockInfo { peer_id_base_58, file_hash, block_hashes } = response;
+                            let PeerBlockInfo { peer_id_base_58, file_hash, block_hashes, .. } = response;
                             debug!("Got block list from {} for file {} : {:?}", peer_id_base_58, file_hash, block_hashes);
                             let blocks_to_request: Vec<String> = block_hashes
                                     .into_iter()
@@ -1257,8 +1402,8 @@ impl DragoonNetwork {
         self.pending_request_block_info.insert(request_id, sender);
     }
 
-    async fn get_block_list(&mut self, file_hash: String) -> Result<Vec<String>> {
-        let block_path = self.get_block_dir(file_hash.clone());
+    async fn get_block_list(file_dir: PathBuf, file_hash: String) -> Result<Vec<String>> {
+        let block_path = get_block_dir(&file_dir, file_hash.clone());
         let mut block_names = vec![];
         let mut dir_entry = tfs::read_dir(block_path).await?;
         while let Some(entry) = dir_entry.next_entry().await? {
@@ -1304,13 +1449,13 @@ impl DragoonNetwork {
     }
 
     async fn encode_file<F, G, P>(
-        &mut self,
+        output_file_dir: PathBuf,
         file_path: String,
         replace_blocks: bool,
         encoding_method: EncodingMethod,
         encode_mat_k: usize,
         encode_mat_n: usize,
-        powers_path: String,
+        powers_path: PathBuf,
     ) -> Result<(String, String)>
     where
         F: PrimeField,
@@ -1339,10 +1484,10 @@ impl DragoonNetwork {
             }
         };
         let shards = fec::encode::<F>(&bytes, &encoding_mat)?;
-        let powers = Self::get_powers(powers_path).await?;
+        let powers = get_powers(powers_path).await?;
         let proof = komodo::prove::<F, G, P>(&bytes, &powers, encode_mat_k)?;
         let blocks = komodo::build::<F, G, P>(&shards, &proof);
-        let block_dir = self.get_block_dir(file_hash.clone());
+        let block_dir = get_block_dir(&output_file_dir, file_hash.clone());
         info!(
             "Checking if the block directory already exists or not: {:?}",
             block_dir
@@ -1361,17 +1506,79 @@ impl DragoonNetwork {
         Ok((file_hash, formatted_output))
     }
 
-    async fn get_powers<F, G>(powers_path: String) -> Result<Powers<F, G>>
-    where
-        F: PrimeField,
-        G: CurveGroup<ScalarField = F>,
-    {
-        info!("Getting the powers from {:?}", powers_path);
-        let serialized = tokio::fs::read(powers_path).await?;
-        Ok(Powers::<F, G>::deserialize_with_mode(
-            &serialized[..],
-            Compress::Yes,
-            Validate::Yes,
-        )?)
+    fn send_block_to(
+        &mut self,
+        peer_id: PeerId,
+        block_hash: String,
+        file_hash: String,
+        sender: Sender<bool>,
+    ) {
+        let mut control = self.swarm.behaviour().send_block.new_control();
+        let own_peer_id = *self.swarm.local_peer_id();
+        let file_dir = self.file_dir.clone();
+        let cmd_sender = self.command_sender.clone();
+        tokio::spawn(async move {
+            let stream = match control.open_stream(peer_id, SEND_BLOCK_PROTOCOL).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!("{}", e);
+                    return;
+                }
+            };
+            let res = send_block_to::send_block_to(
+                stream,
+                own_peer_id,
+                block_hash.clone(),
+                file_hash,
+                file_dir,
+            )
+            .await;
+            let (remove_sender, remove_receiver) = oneshot::channel();
+            if cmd_sender
+                .send(DragoonCommand::RemoveEntryFromSendBlockToSet {
+                    peer_id,
+                    block_hash: block_hash.clone(),
+                    sender: Sender::SenderOneS(remove_sender),
+                })
+                .is_err()
+            {
+                error!("Could not send the request to remove the entry in the table of pending_send_block_to corresponding to ({}, {})", peer_id, block_hash)
+            }
+
+            let _ = remove_receiver.await;
+
+            if match sender {
+                Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
+                Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
+            }
+            .is_err()
+            {
+                error!("Could not send the result of the send_block_to operation")
+            }
+        });
     }
+}
+
+pub(crate) fn get_block_dir(file_dir: &PathBuf, file_hash: String) -> PathBuf {
+    [get_file_dir(file_dir, file_hash), PathBuf::from("blocks")]
+        .iter()
+        .collect()
+}
+
+pub(crate) fn get_file_dir(file_dir: &PathBuf, file_hash: String) -> PathBuf {
+    [file_dir, &PathBuf::from(file_hash)].iter().collect()
+}
+
+pub(crate) async fn get_powers<F, G>(powers_path: PathBuf) -> Result<Powers<F, G>>
+where
+    F: PrimeField,
+    G: CurveGroup<ScalarField = F>,
+{
+    info!("Getting the powers from {:?}", powers_path);
+    let serialized = tokio::fs::read(powers_path).await?;
+    Ok(Powers::<F, G>::deserialize_with_mode(
+        &serialized[..],
+        Compress::Yes,
+        Validate::Yes,
+    )?)
 }

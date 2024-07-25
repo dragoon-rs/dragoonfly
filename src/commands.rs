@@ -92,8 +92,11 @@ pub(crate) enum DragoonCommand {
         encoding_method: EncodingMethod,
         encode_mat_k: usize,
         encode_mat_n: usize,
-        powers_path: String,
+        powers_path: PathBuf,
         sender: Sender<(String, String)>,
+    },
+    GetAvailableStorage {
+        sender: Sender<usize>,
     },
     GetBlockDir {
         file_hash: String,
@@ -120,7 +123,7 @@ pub(crate) enum DragoonCommand {
     GetFile {
         file_hash: String,
         output_filename: String,
-        powers_path: String,
+        powers_path: PathBuf,
         sender: Sender<PathBuf>,
     },
     GetFileDir {
@@ -147,8 +150,19 @@ pub(crate) enum DragoonCommand {
     NodeInfo {
         sender: Sender<PeerId>,
     },
+    RemoveEntryFromSendBlockToSet {
+        peer_id: PeerId,
+        block_hash: String,
+        sender: Sender<()>,
+    },
     RemoveListener {
         listener_id: u64,
+        sender: Sender<bool>,
+    },
+    SendBlockTo {
+        peer_id: PeerId,
+        file_hash: String,
+        block_hash: String,
         sender: Sender<bool>,
     },
     StartProvide {
@@ -165,9 +179,8 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::DecodeBlocks { .. } => write!(f, "decode-blocks"),
             DragoonCommand::DialMultiple { .. } => write!(f, "dial-multiple"),
             DragoonCommand::DialSingle { .. } => write!(f, "dial-single"),
-            // DragoonCommand::DragoonPeers { .. } => write!(f, "dragoon-peers"),
-            // DragoonCommand::DragoonSend { .. } => write!(f, "dragoon-send"),
             DragoonCommand::EncodeFile { .. } => write!(f, "encode-file"),
+            DragoonCommand::GetAvailableStorage { .. } => write!(f, "get-available-storage"),
             DragoonCommand::GetBlockDir { .. } => write!(f, "get-block-dir"),
             DragoonCommand::GetBlockFrom { .. } => write!(f, "get-block-from"),
             DragoonCommand::GetBlocksInfoFrom { .. } => write!(f, "get-blocks-info-from"),
@@ -181,7 +194,11 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Listen { .. } => write!(f, "listen"),
             DragoonCommand::NodeInfo { .. } => write!(f, "node-info"),
+            DragoonCommand::RemoveEntryFromSendBlockToSet { .. } => {
+                write!(f, "remove-entry-from-send-block-to-set")
+            }
             DragoonCommand::RemoveListener { .. } => write!(f, "remove-listener"),
+            DragoonCommand::SendBlockTo { .. } => write!(f, "send-block-to"),
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
         }
     }
@@ -301,7 +318,7 @@ pub(crate) async fn create_cmd_dial_single(
 // }
 
 pub(crate) async fn create_cmd_encode_file(
-    Path((file_path, replace_blocks, encoding_method, encode_mat_k, encode_mat_n, powers_path)): Path<(String, bool, EncodingMethod, usize, usize, String)>,
+    Path((file_path, replace_blocks, encoding_method, encode_mat_k, encode_mat_n, powers_path)): Path<(String, bool, EncodingMethod, usize, usize, PathBuf)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command `encode_file`");
@@ -315,6 +332,13 @@ pub(crate) async fn create_cmd_encode_file(
         encode_mat_n,
         powers_path
     )
+}
+
+pub(crate) async fn create_cmd_get_available_storage(
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `get_available_storage`");
+    dragoon_command!(state, GetAvailableStorage)
 }
 
 pub(crate) async fn create_cmd_get_block_from(
@@ -351,7 +375,7 @@ pub(crate) async fn create_cmd_get_connected_peers(State(state): State<Arc<AppSt
 }
 
 pub(crate) async fn create_cmd_get_file(
-    Path((file_hash, output_filename, powers_path)): Path<(String, String, String)>,
+    Path((file_hash, output_filename, powers_path)): Path<(String, String, PathBuf)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command get_file");
@@ -429,6 +453,16 @@ pub(crate) async fn create_cmd_remove_listener(
 ) -> Response {
     info!("running command `remove_listener`");
     dragoon_command!(state, RemoveListener, listener_id)
+}
+
+pub(crate) async fn create_cmd_send_block_to(
+    Path((peer_id_base_58, file_hash, block_hash)): Path<(String, String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    info!("running command `send_block_to`");
+    let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
+    let peer_id = PeerId::from_bytes(&bytes).unwrap();
+    dragoon_command!(state, SendBlockTo, peer_id, block_hash, file_hash)
 }
 
 pub(crate) async fn create_cmd_start_provide(
