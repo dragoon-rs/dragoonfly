@@ -3,14 +3,15 @@ mod commands;
 mod dragoon_network;
 mod error;
 mod peer_block_info;
+mod send_block_to;
 mod to_serialize;
 
 use axum::routing::get;
 use axum::Router;
 use libp2p::identity;
 use libp2p::identity::Keypair;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{net::SocketAddr, path::PathBuf};
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -73,11 +74,21 @@ pub(crate) async fn main() -> Result<()> {
         .route("/get-file/:file_hash/:output_filename/:powers_path", get(commands::create_cmd_get_file))
         .route("/get-block-list/:file_hash", get(commands::create_cmd_get_block_list))
         .route("/get-blocks-info-from/:peer_id_base_58/:file_hash", get(commands::create_cmd_get_blocks_info_from))
-        .route("/node-info", get(commands::create_cmd_node_info));
+        .route("/node-info", get(commands::create_cmd_node_info))
+        .route("/send-block-to/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_send_block_to))
+        .route("/get-available-storage", get(commands::create_cmd_get_available_storage));
 
     let router = router.with_state(Arc::new(app::AppState::new(cmd_sender.clone())));
 
-    let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(1) {
+    let powers_path: PathBuf = if let Some(powers_path) = std::env::args().nth(1) {
+        powers_path
+    } else {
+        panic!("No path has been provided for the powers")
+    }
+    .parse()
+    .unwrap();
+
+    let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(2) {
         ip_port
     } else {
         "127.0.0.1:3000".to_string()
@@ -85,7 +96,7 @@ pub(crate) async fn main() -> Result<()> {
     .parse()
     .unwrap();
 
-    let id = if let Some(id) = std::env::args().nth(2) {
+    let id = if let Some(id) = std::env::args().nth(3) {
         id.parse::<u8>().unwrap()
     } else {
         0
@@ -100,7 +111,17 @@ pub(crate) async fn main() -> Result<()> {
     info!("Peer ID: {} ({})", peer_id, id);
 
     let swarm = dragoon_network::create_swarm(kp).await?;
-    let network = DragoonNetwork::new(swarm, cmd_receiver, cmd_sender, peer_id, true);
+    let total_available_storage_for_send = 20usize * 10usize.pow(9); // 20 GB for storing send blocks
+    let network = DragoonNetwork::new(
+        swarm,
+        cmd_receiver,
+        cmd_sender,
+        powers_path,
+        total_available_storage_for_send,
+        peer_id,
+        false,
+    );
+
     tokio::spawn(network.run::<Fr, G1Projective, DensePolynomial<Fr>>());
 
     let shutdown = signal::ctrl_c();

@@ -30,6 +30,9 @@ bs58 = "0.5.1"
 rs_merkle = "1.4.2"
 resolve-path = "0.1.0"
 async-stream = "0.3.5"
+libp2p-stream = "0.1.0-alpha.1"
+strum = { version = "0.26", features = ["derive"] }
+chrono = "0.4.38"
 
 [dependencies.libp2p]
 default-features = false

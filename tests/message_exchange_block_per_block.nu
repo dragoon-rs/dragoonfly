@@ -8,6 +8,10 @@ use help_func/exit_func.nu exit_on_error
 let output_dir: path = "/tmp/dragoon_test/received_blocks"
 let test_file: path = "tests/assets/dragoon_32/dragoon_32x32.png"
 let res_filename = "reconstructed_file.png"
+let dragoonfly_root = "~/.share/dragoonfly"
+
+print $"Removing ($dragoonfly_root) if it was there from a previous test\n"
+try { rm -r "~/.share/dragoonfly" }
 
 const connection_list = [
     [1], 
