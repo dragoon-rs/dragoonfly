@@ -635,12 +635,6 @@ where {
                 debug!("sending listeners {:?}", listeners);
                 sender_send_match(sender, Ok(listeners), String::from("get listeners"));
             }
-            DragoonCommand::GetPeerId { sender } => {
-                let peer_id = *self.swarm.local_peer_id();
-
-                debug!("sending peer_id {}", peer_id);
-                sender_send_match(sender, Ok(peer_id), String::from("GetPeerId"));
-            }
             DragoonCommand::GetNetworkInfo { sender } => {
                 let network_info = self.swarm.network_info();
 

@@ -24,10 +24,10 @@ def main [--ssh_addr_file: path] {
     try {
         let node_number = $SWARM | length
         assert equal $node_number ($connection_list | length)
-        mut name_list: table = [{(app get-peer-id --node ($SWARM.0.ip_port)): 0 }]
+        mut name_list: table = [{(app node-info --node ($SWARM.0.ip_port) | get 0): 0 }]
         
         for i in 1..($node_number - 1) {
-            $name_list = ($name_list | merge [{(app get-peer-id --node ($SWARM | get $i | get ip_port)): $i }])
+            $name_list = ($name_list | merge [{(app node-info --node ($SWARM | get $i | get ip_port) | get 0): $i }])
         }
         print "Names of the nodes are:"
         print $name_list

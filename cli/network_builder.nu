@@ -134,6 +134,6 @@ export def build_network [
     } catch { |e|
         log info "Killing the swarm"
         swarm kill --no-shell $SWARM
-        error make --unspanned {msg: $"Builder failed: ($e.msg)"}
+        error make {msg: $"Builder failed: ($e)"}
     }
 }

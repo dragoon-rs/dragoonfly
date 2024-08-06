@@ -8,7 +8,7 @@ mod send_strategy;
 mod send_strategy_impl;
 mod to_serialize;
 
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
 use libp2p::identity;
@@ -75,48 +75,32 @@ pub(crate) async fn main() -> Result<()> {
     let router = Router::new()
         .route("/listen/:addr", get(commands::create_cmd_listen))
         .route("/get-listeners", get(commands::create_cmd_get_listeners))
-        .route("/get-peer-id", get(commands::create_cmd_get_peer_id))
         .route(
             "/get-network-info",
             get(commands::create_cmd_get_network_info),
         )
         .route(
-            "/remove-listener/:id",
-            get(commands::create_cmd_remove_listener),
+            "/remove-listener",
+            post(commands::create_cmd_remove_listener),
         )
         .route(
             "/get-connected-peers",
             get(commands::create_cmd_get_connected_peers),
         )
-        .route("/dial-single/:addr", get(commands::create_cmd_dial_single))
-        .route(
-            "/dial-multiple/:list_addr",
-            get(commands::create_cmd_dial_multiple),
-        )
-        .route("/add-peer/:addr", get(commands::create_cmd_add_peer))
-        .route(
-            "/start-provide/:key",
-            get(commands::create_cmd_start_provide),
-        )
-        .route("/stop-provide/:key", get(commands::create_cmd_stop_provide))
-        .route(
-            "/get-providers/:key",
-            get(commands::create_cmd_get_providers),
-        )
+        .route("/dial-single", post(commands::create_cmd_dial_single))
+        .route("/dial-multiple", post(commands::create_cmd_dial_multiple))
+        .route("/add-peer", post(commands::create_cmd_add_peer))
+        .route("/start-provide", post(commands::create_cmd_start_provide))
+        .route("/stop-provide", post(commands::create_cmd_stop_provide))
+        .route("/get-providers", post(commands::create_cmd_get_providers))
         .route("/bootstrap", get(commands::create_cmd_bootstrap))
         // .route("/dragoon/peers", get(commands::create_cmd_dragoon_peers))
         // .route(
         //     "/dragoon/send/:peer/:block_hash/:block_path",
         //     get(commands::create_cmd_dragoon_send),
         // )
-        .route(
-            "/decode-blocks/:block-dir/:block_hashes/:output_filename",
-            get(commands::create_cmd_decode_blocks),
-        )
-        .route(
-            "/encode-file/:file_path/:replace-blocks/:encoding-method/:encode_mat_k/:encode_mat_n",
-            get(commands::create_cmd_encode_file),
-        )
+        .route("/decode-blocks", post(commands::create_cmd_decode_blocks))
+        .route("/encode-file", post(commands::create_cmd_encode_file))
         .route(
             "/get-block-from/:peer_id_base_58/:file_hash/:block_hash/:save_to_disk",
             get(commands::create_cmd_get_block_from),
@@ -134,21 +118,18 @@ pub(crate) async fn main() -> Result<()> {
             get(commands::create_cmd_get_blocks_info_from),
         )
         .route("/node-info", get(commands::create_cmd_node_info))
-        .route(
-            "/send-block-to/:peer_id_base_58/:file_hash/:block_hash",
-            get(commands::create_cmd_send_block_to),
-        )
+        .route("/send-block-to", post(commands::create_cmd_send_block_to))
         .route(
             "/get-available-storage",
             get(commands::create_cmd_get_available_storage),
         )
         .route(
-            "/send-block-list/:strategy_name/:file_hash/:block_list",
-            get(commands::create_cmd_send_block_list),
+            "/send-block-list",
+            post(commands::create_cmd_send_block_list),
         )
         .route(
-            "/change-available-send-storage/:new_storage_size",
-            get(commands::create_cmd_change_available_send_storage),
+            "/change-available-send-storage",
+            post(commands::create_cmd_change_available_send_storage),
         );
 
     let router = router.with_state(Arc::new(app::AppState::new(cmd_sender.clone())));

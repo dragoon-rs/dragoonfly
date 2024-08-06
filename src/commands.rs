@@ -1,9 +1,9 @@
 //! Define all the commands that can be used by the network
 
 use anyhow::{self, format_err, Error, Result};
-use axum::extract::{Path, State};
+use axum::extract::{Json, Path, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Json, Response};
+use axum::response::{self, IntoResponse, Response};
 use libp2p::swarm::NetworkInfo;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
@@ -161,9 +161,6 @@ pub(crate) enum DragoonCommand {
     GetNetworkInfo {
         sender: Sender<NetworkInfo>,
     },
-    GetPeerId {
-        sender: Sender<PeerId>,
-    },
     GetProviders {
         key: String,
         sender: Sender<Vec<PeerId>>,
@@ -227,7 +224,6 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::GetFile { .. } => write!(f, "get-file"),
             DragoonCommand::GetFileDir { .. } => write!(f, "get-file-dir"),
             DragoonCommand::GetListeners { .. } => write!(f, "get-listener"),
-            DragoonCommand::GetPeerId { .. } => write!(f, "get-peer-id"),
             DragoonCommand::GetNetworkInfo { .. } => write!(f, "get-network-info"),
             DragoonCommand::GetProviders { .. } => write!(f, "get-providers"),
             DragoonCommand::Listen { .. } => write!(f, "listen"),
@@ -258,9 +254,9 @@ where
             Ok(convertable) => (
                 StatusCode::OK,
                 JsonWrapper(
-                    Json(convertable.convert_ser()), // into_response is implement for Json<T> where T: Serialize
-                                                     // so we convert everything to a Serialize
-                                                     // see to_serialize to check how the conversion is done
+                    response::Json(convertable.convert_ser()), // into_response is implement for Json<T> where T: Serialize
+                                                               // so we convert everything to a Serialize
+                                                               // see to_serialize to check how the conversion is done
                 )
                 .into_response(),
             )
@@ -299,8 +295,8 @@ macro_rules! dragoon_command {
 // Implementation of dragoon commands
 
 pub(crate) async fn create_cmd_add_peer(
-    Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
+    Json(multiaddr): Json<String>,
 ) -> Response {
     info!("running command `add_peer`");
     dragoon_command!(state, AddPeer, multiaddr)
@@ -312,20 +308,17 @@ pub(crate) async fn create_cmd_bootstrap(State(state): State<Arc<AppState>>) -> 
 }
 
 pub(crate) async fn create_cmd_change_available_send_storage(
-    Path(new_storage_size): Path<usize>,
     State(state): State<Arc<AppState>>,
+    Json(new_storage_size): Json<usize>,
 ) -> Response {
     info!("running command `change_available_send_storage`");
     dragoon_command!(state, ChangeAvailableSendStorage, new_storage_size)
 }
 
 pub(crate) async fn create_cmd_decode_blocks(
-    Path((block_dir, block_hashes_json, output_filename)): Path<(String, String, String)>,
     State(state): State<Arc<AppState>>,
+    Json((block_dir, block_hashes, output_filename)): Json<(String, Vec<String>, String)>,
 ) -> Response {
-    let block_hashes = serde_json::from_str(&block_hashes_json).expect(
-        "Could not parse user input as a valid list of block hashes when trying to decode blocks",
-    );
     info!("running command `decode_blocks");
     dragoon_command!(
         state,
@@ -337,21 +330,19 @@ pub(crate) async fn create_cmd_decode_blocks(
 }
 
 pub(crate) async fn create_cmd_dial_multiple(
-    Path(list_multiaddr_json): Path<String>,
     State(state): State<Arc<AppState>>,
+    Json(list_multiaddr): Json<Vec<String>>,
 ) -> Response {
-    let list_multiaddr = serde_json::from_str(&list_multiaddr_json).expect(
-        "Could not parse user input as a valid list of mutliaddr when trying to dial multiple peers",
-    );
     info!("running command `dial-multiple`");
     dragoon_command!(state, DialMultiple, list_multiaddr)
 }
 
 pub(crate) async fn create_cmd_dial_single(
-    Path(multiaddr): Path<String>,
     State(state): State<Arc<AppState>>,
+    Json(multiaddr): Json<String>,
 ) -> Response {
     info!("running command `dial-single`");
+    info!("multiaddr: {:?}", multiaddr);
     dragoon_command!(state, DialSingle, multiaddr)
 }
 
@@ -369,14 +360,14 @@ pub(crate) async fn create_cmd_dial_single(
 // }
 
 pub(crate) async fn create_cmd_encode_file(
-    Path((file_path, replace_blocks, encoding_method, encode_mat_k, encode_mat_n)): Path<(
+    State(state): State<Arc<AppState>>,
+    Json((file_path, replace_blocks, encoding_method, encode_mat_k, encode_mat_n)): Json<(
         String,
         bool,
         EncodingMethod,
         usize,
         usize,
     )>,
-    State(state): State<Arc<AppState>>,
 ) -> Response {
     info!("running command `encode_file`");
     dragoon_command!(
@@ -455,14 +446,9 @@ pub(crate) async fn create_cmd_get_listeners(State(state): State<Arc<AppState>>)
     dragoon_command!(state, GetListeners)
 }
 
-pub(crate) async fn create_cmd_get_peer_id(State(state): State<Arc<AppState>>) -> Response {
-    info!("running command `get_peer_id`");
-    dragoon_command!(state, GetPeerId)
-}
-
 pub(crate) async fn create_cmd_get_providers(
-    Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
+    Json(key): Json<String>,
 ) -> Response {
     info!("running command `get_providers`");
     dragoon_command!(state, GetProviders, key)
@@ -516,27 +502,24 @@ pub(crate) async fn create_cmd_node_info(State(state): State<Arc<AppState>>) -> 
 }
 
 pub(crate) async fn create_cmd_remove_listener(
-    Path(listener_id): Path<u64>,
     State(state): State<Arc<AppState>>,
+    Json(listener_id): Json<u64>,
 ) -> Response {
     info!("running command `remove_listener`");
     dragoon_command!(state, RemoveListener, listener_id)
 }
 
 pub(crate) async fn create_cmd_send_block_list(
-    Path((strategy_name, file_hash, block_hashes_json)): Path<(StrategyName, String, String)>,
     State(state): State<Arc<AppState>>,
+    Json((strategy_name, file_hash, block_list)): Json<(StrategyName, String, Vec<String>)>,
 ) -> Response {
-    let block_list = serde_json::from_str(&block_hashes_json).expect(
-        "Could not parse user input as a valid list of block hashes when trying to decode blocks",
-    );
     info!("running command `send_block_list`");
     dragoon_command!(state, SendBlockList, strategy_name, file_hash, block_list)
 }
 
 pub(crate) async fn create_cmd_send_block_to(
-    Path((peer_id_base_58, file_hash, block_hash)): Path<(String, String, String)>,
     State(state): State<Arc<AppState>>,
+    Json((peer_id_base_58, file_hash, block_hash)): Json<(String, String, String)>,
 ) -> Response {
     info!("running command `send_block_to`");
     let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
@@ -545,16 +528,16 @@ pub(crate) async fn create_cmd_send_block_to(
 }
 
 pub(crate) async fn create_cmd_start_provide(
-    Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
+    Json(key): Json<String>,
 ) -> Response {
     info!("running command `start_provide`");
     dragoon_command!(state, StartProvide, key)
 }
 
 pub(crate) async fn create_cmd_stop_provide(
-    Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
+    Json(key): Json<String>,
 ) -> Response {
     info!("running command `stop_provide`");
     dragoon_command!(state, StopProvide, key)

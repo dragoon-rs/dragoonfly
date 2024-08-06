@@ -23,22 +23,29 @@ const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
 #         }
 # }
 
-def run-command [node: string]: string -> any {
-    let command = $in
+def run-command [
+    node: string,
+    --post-body: any
+]: string -> any {
+    let command_path = $in
 
-    let res = $node
+    let query = $node
         | parse "{ip}:{port}"
         | into record
         | rename --column {ip: host}
         | insert scheme "http"
-        | insert path $command
+        | insert path $command_path
         | url join
-        | http get $in --allow-errors --full
-        #| http get-curl $in --allow-errors --full
+
+    let res = if $post_body != null {
+        http post --allow-errors --full -t application/json $query $post_body
+    } else {
+        http get --allow-errors --full $query 
+    }
 
     if $res.status == $HTTP.NOT_FOUND {
         error make --unspanned {
-            msg: $"command `($command)` does not appear to be valid \(($res.status)\)"
+            msg: $"command `($command_path)` does not appear to be valid \(($res.status)\): ($res.body)"
         }
     } else if $res.status != $HTTP.OK {
         error make --unspanned {
@@ -70,12 +77,6 @@ export def get-listeners [--node: string = $DEFAULT_IP]: nothing -> list<string>
     "get-listeners" | run-command $node
 }
 
-# get the peer ID of the server in base 58
-export def get-peer-id [--node: string = $DEFAULT_IP]: nothing -> string {
-    log debug $"getting peer-id of ($node)"
-    "get-peer-id" | run-command $node
-}
-
 # get some information about the network
 export def get-network-info [--node: string = $DEFAULT_IP]: nothing -> record<peers: int, pending: int, connections: int, established: int, pending_incoming: int, pending_outgoing: int, established_incoming: int, established_outgoing: int> {
     log debug $"getting network info of ($node)"
@@ -92,7 +93,7 @@ export def remove-listener [
     --node: string = $DEFAULT_IP
 ]: nothing -> bool {
     log debug $"removing listener ($listener_id) from ($node)"
-    $"remove-listener/($listener_id)" | run-command $node
+    $"remove-listener" | run-command $node --post-body $listener_id
 }
 
 # get the list of currently connected peers
@@ -106,9 +107,8 @@ export def dial-single [
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"dialing ($multiaddr) from ($node)"
-    let multiaddr = $multiaddr | slash replace
-
-    $"dial-single/($multiaddr)" | run-command $node
+    
+    $"dial-single" | run-command $node --post-body $multiaddr
 }
 
 export def dial-multiple [
@@ -116,9 +116,12 @@ export def dial-multiple [
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"dialing all the following multiaddr: ($list_multiaddr) from ($node)"
-    let list_multiaddr = $list_multiaddr | each {slash replace} | to json
 
-    $"dial-multiple/($list_multiaddr)" | run-command $node
+    if $list_multiaddr == [] {
+        return "1"
+    }
+    
+    $"dial-multiple" | run-command $node --post-body $list_multiaddr
 }
 
 export def add-peer [
@@ -126,9 +129,8 @@ export def add-peer [
     --node: string = $DEFAULT_IP
 ]: nothing -> string {
     log debug $"adding peer ($multiaddr) to ($node)"
-    let multiaddr = $multiaddr | slash replace
 
-    $"add-peer/($multiaddr)" | run-command $node
+    $"add-peer" | run-command $node --post-body $multiaddr
 }
 
 export def start-provide [
@@ -136,7 +138,7 @@ export def start-provide [
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
     log debug $"($node) starts providing ($key)"
-    $"start-provide/($key)" | run-command $node
+    $"start-provide" | run-command $node --post-body $key
 }
 
 export def stop-provide [
@@ -144,7 +146,7 @@ export def stop-provide [
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
     log debug $"($node) stops providing ($key)"
-    $"stop-provide/($key)" | run-command $node
+    $"stop-provide" | run-command $node --post-body $key
 }
 
 export def get-providers [
@@ -152,7 +154,7 @@ export def get-providers [
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
     log debug $"getting providers of ($key) from ($node)"
-    $"get-providers/($key)" | run-command $node
+    $"get-providers" | run-command $node --post-body $key
 }
 
 export def bootstrap [
@@ -171,15 +173,16 @@ export def add-file [
     $"add-file/($key)/($content)" | run-command $node
 }
 
+##! Change this to not require the block dir path (as everything should be in the .share path)
 export def decode-blocks [
     block_dir: string,
     block_hashes: list<string>,
     output_filename: string,
     --node: string = $DEFAULT_IP,
 ]: nothing -> any {
+    let block_dir = $block_dir | path expand
     log debug $"decoding the blocks ($block_hashes) from ($block_dir)"
-    let message = $"decode-blocks/($block_dir | slash replace)/($block_hashes | to json)/($output_filename)"
-    $message | run-command $node
+    "decode-blocks" | run-command $node --post-body [$block_dir, $block_hashes, $output_filename]
 }
 
 export def encode-file [
@@ -191,9 +194,8 @@ export def encode-file [
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
     log debug $"encoding the file ($file_path)"
-    let file_path_enc = $file_path | slash replace
-    let list_args = [$file_path_enc, $replace_blocks, $encoding_method, $k, $n]
-    $"encode-file/($list_args | str join '/')" | run-command $node
+    let list_args = [$file_path, $replace_blocks, $encoding_method, $k, $n]
+    $"encode-file" | run-command $node --post-body $list_args
 }
 
 export def get-block-from [
@@ -256,7 +258,7 @@ export def send-block-list [
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
     log debug $"Sending the list of blocks ($block_list) from file ($file_hash) using the strategy ($strategy_name)"
-    $"send-block-list/($strategy_name)/($file_hash)/($block_list | to json)" | run-command $node
+    $"send-block-list" | run-command $node --post-body [$strategy_name, $file_hash, $block_list]
 }
 
 export def send-block-to [
@@ -266,7 +268,7 @@ export def send-block-to [
     --node: string = $DEFAULT_IP
 ] nothing -> any {
     log debug $"Sending block ($block_hash) part of file ($file_hash) to ($peer_id_base_58)"
-    $"send-block-to/($peer_id_base_58)/($file_hash)/($block_hash)" | run-command $node
+    $"send-block-to" | run-command $node --post-body [$peer_id_base_58, $file_hash, $block_hash]
 }
 
 export def get-available-storage [
@@ -281,5 +283,5 @@ export def change-available-send-storage [
     new_storage_space: int,
 ] nothing -> any {
     log debug $"Changing the total available storage space to be ($new_storage_space)"
-    $"change-available-send-storage/($new_storage_space)" | run-command $node
+    $"change-available-send-storage" | run-command $node --post-body $'($new_storage_space)'
 }
