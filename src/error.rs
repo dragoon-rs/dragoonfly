@@ -3,6 +3,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use thiserror::Error;
 
+use crate::send_strategy::SendId;
+
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum DragoonError {
     #[error("Bad listener given")]
@@ -21,6 +23,19 @@ pub enum DragoonError {
     CouldNotSendBlockResponse(String, String, String),
     #[error("The peer block info response for file {0} through channel {1} could not be sent (channel closed due to a timeout or the connection was closed)")]
     CouldNotSendInfoResponse(String, String),
+    #[error("The block {} of file {} could not be sent to {}", send_id.block_hash, send_id.file_hash, send_id.peer_id)]
+    SendBlockToError { send_id: SendId },
+    #[error("This SendBlockTo request to {:?} for file hash {} / block hash {} is already being handled", send_id.peer_id, send_id.file_hash, send_id.block_hash)]
+    SendBlockToAlreadyStarted { send_id: SendId },
+    #[error(
+        "Send block list failed with a final block distribution of {:?}, due to {}",
+        final_block_distribution,
+        context
+    )]
+    SendBlockListFailed {
+        final_block_distribution: Vec<SendId>,
+        context: String,
+    },
 }
 
 impl IntoResponse for DragoonError {
@@ -50,6 +65,15 @@ impl IntoResponse for DragoonError {
             }
             DragoonError::CouldNotSendInfoResponse(file_hash, channel_string) => {
                 (StatusCode::REQUEST_TIMEOUT, format!("The peer block info response for file {0} through channel {1} could not be sent (channel closed due to a timeout or the connection was closed)", file_hash, channel_string))
+            }
+            DragoonError::SendBlockToError{send_id} => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("The block {} of file {} could not be sent to {}", send_id.block_hash, send_id.file_hash, send_id.peer_id))
+            }
+            DragoonError::SendBlockToAlreadyStarted{send_id} => {
+                (StatusCode::TOO_MANY_REQUESTS, format!("This SendBlockTo request to {:?} for file hash {} / block hash {} is already being handled", send_id.peer_id, send_id.file_hash, send_id.block_hash))
+            }
+            DragoonError::SendBlockListFailed{final_block_distribution, context} => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("Send block list failed with a final block distribution of {:?}, due to {}", final_block_distribution, context))
             }
         };
         (status, Json(err_msg.to_string())).into_response()

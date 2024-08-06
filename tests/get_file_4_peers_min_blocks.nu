@@ -17,7 +17,7 @@ use help_func/exit_func.nu exit_on_error
 # define variables
 let test_file: path = "tests/assets/dragoon_32/dragoon_32x32.png"
 let res_filename = "reconstructed_file.png"
-let dragoonfly_root = "~/.share/dragoonfly"
+let dragoonfly_root = "~/.share/dragoonfly" | path expand
 
 print $"Removing ($dragoonfly_root) if it was there from a previous test\n"
 try { rm -r $dragoonfly_root }
@@ -89,9 +89,7 @@ try {
 
     print "Checking the difference between the original and reconstructed file"
     let difference = {diff $output_path $test_file} | exit_on_error | get stdout
-    if $difference == "" {
-        print $"(ansi light_green_reverse)    TEST SUCCESSFUL !(ansi reset)\n"
-    } else {
+    if $difference != "" {
         print "test failed, there was a difference between the files"
         error make {msg: "Exit to catch"}
     }

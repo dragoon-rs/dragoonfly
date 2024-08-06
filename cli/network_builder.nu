@@ -36,12 +36,17 @@ use std log
 #
 # Note that because of type conversion, an empty list is not acceptable, so you can just write [0] instead of empty lists (will be ignored for all nodes), since 0 is the smallest node number
 #
-export def build_network [connection_list: list<list<int>>, --no-shell]: nothing -> table {
+export def build_network [
+    connection_list: list<list<int>>, 
+    --no-shell,
+    --storage_space: list<int>,
+    --unit_list: list<string>,
+    ]: nothing -> table {
     # checking the matrix is correctly built
     let matrix_size = $connection_list | length
 
-    log info $"(ansi light_green_reverse)Launching the network(ansi reset)"
-    let SWARM = swarm create ($matrix_size)
+    print $"(ansi light_green_reverse)Launching the network(ansi reset)"
+    let SWARM = swarm create $matrix_size --storage_space $storage_space --unit_list $unit_list
     let log_dir = swarm run --no-shell $SWARM
 
     print $SWARM
@@ -80,6 +85,7 @@ export def build_network [connection_list: list<list<int>>, --no-shell]: nothing
         }
 
         log debug "Making all the other nodes start to listen on their server ports"
+        #! this doesn't work with nushell 0.95
         1..($matrix_size - 1) | par-each { |i|
             log debug $"Trying to listen on ($i)"
             app listen --node ($SWARM. | get $i | get ip_port) ($SWARM |get $i | get multiaddr)

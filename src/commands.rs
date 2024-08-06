@@ -1,6 +1,6 @@
 //! Define all the commands that can be used by the network
 
-use anyhow::{self, Result};
+use anyhow::{self, format_err, Error, Result};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
@@ -19,6 +19,8 @@ use crate::app::AppState;
 use crate::dragoon_network::BlockResponse;
 use crate::error::DragoonError;
 use crate::peer_block_info::PeerBlockInfo;
+use crate::send_strategy::SendId;
+use crate::send_strategy_impl::StrategyName;
 use crate::to_serialize::{ConvertSer, JsonWrapper};
 
 // use komodo::linalg::Matrix;
@@ -45,13 +47,33 @@ pub(crate) enum EncodingMethod {
 //
 // - behaviour
 
-pub(crate) type SenderOneS<T> = oneshot::Sender<Result<T>>;
-pub(crate) type SenderMPSC<T> = mpsc::UnboundedSender<Result<T>>;
+pub(crate) type SenderOneS<T, E = Error> = oneshot::Sender<Result<T, E>>;
+pub(crate) type SenderMPSC<T, E = Error> = mpsc::UnboundedSender<Result<T, E>>;
 
 #[derive(Debug)]
-pub(crate) enum Sender<T> {
-    SenderOneS(SenderOneS<T>),
-    SenderMPSC(SenderMPSC<T>),
+pub(crate) enum Sender<T, E = Error> {
+    SenderOneS(SenderOneS<T, E>),
+    SenderMPSC(SenderMPSC<T, E>),
+}
+
+pub(crate) fn sender_send_match<T, E>(
+    sender: Sender<T, E>,
+    res: Result<T, E>,
+    operation_name: String,
+) where
+    E: std::fmt::Debug,
+{
+    if match sender {
+        Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
+        Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
+    }
+    .is_err()
+    {
+        error!(
+            "Could not send the result of the {} operation",
+            operation_name
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -159,11 +181,17 @@ pub(crate) enum DragoonCommand {
         listener_id: u64,
         sender: Sender<bool>,
     },
+    SendBlockList {
+        strategy_name: StrategyName,
+        file_hash: String,
+        block_list: Vec<String>,
+        sender: Sender<Vec<SendId>, DragoonError>,
+    },
     SendBlockTo {
         peer_id: PeerId,
         file_hash: String,
         block_hash: String,
-        sender: Sender<bool>,
+        sender: Sender<(bool, SendId), DragoonError>,
     },
     StartProvide {
         key: String,
@@ -198,16 +226,20 @@ impl std::fmt::Display for DragoonCommand {
                 write!(f, "remove-entry-from-send-block-to-set")
             }
             DragoonCommand::RemoveListener { .. } => write!(f, "remove-listener"),
+            DragoonCommand::SendBlockList { .. } => write!(f, "send-block-list"),
             DragoonCommand::SendBlockTo { .. } => write!(f, "send-block-to"),
             DragoonCommand::StartProvide { .. } => write!(f, "start-provide"),
         }
     }
 }
 
-async fn command_res_match(
-    receiver: oneshot::Receiver<Result<impl ConvertSer>>,
+async fn command_res_match<E>(
+    receiver: oneshot::Receiver<Result<impl ConvertSer, E>>,
     cmd_name: String,
-) -> Response {
+) -> Response
+where
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
     match receiver.await {
         Err(e) => handle_canceled(e, &cmd_name),
         Ok(res) => match res {
@@ -272,10 +304,10 @@ pub(crate) async fn create_cmd_decode_blocks(
     Path((block_dir, block_hashes_json, output_filename)): Path<(String, String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    info!("running command `decode_blocks");
     let block_hashes = serde_json::from_str(&block_hashes_json).expect(
         "Could not parse user input as a valid list of block hashes when trying to decode blocks",
     );
+    info!("running command `decode_blocks");
     dragoon_command!(
         state,
         DecodeBlocks,
@@ -289,10 +321,10 @@ pub(crate) async fn create_cmd_dial_multiple(
     Path(list_multiaddr_json): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    info!("running command `dial-multiple`");
     let list_multiaddr = serde_json::from_str(&list_multiaddr_json).expect(
         "Could not parse user input as a valid list of mutliaddr when trying to dial multiple peers",
     );
+    info!("running command `dial-multiple`");
     dragoon_command!(state, DialMultiple, list_multiaddr)
 }
 
@@ -455,6 +487,17 @@ pub(crate) async fn create_cmd_remove_listener(
     dragoon_command!(state, RemoveListener, listener_id)
 }
 
+pub(crate) async fn create_cmd_send_block_list(
+    Path((strategy_name, file_hash, block_hashes_json)): Path<(StrategyName, String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let block_list = serde_json::from_str(&block_hashes_json).expect(
+        "Could not parse user input as a valid list of block hashes when trying to decode blocks",
+    );
+    info!("running command `send_block_list`");
+    dragoon_command!(state, SendBlockList, strategy_name, file_hash, block_list)
+}
+
 pub(crate) async fn create_cmd_send_block_to(
     Path((peer_id_base_58, file_hash, block_hash)): Path<(String, String, String)>,
     State(state): State<Arc<AppState>>,
@@ -475,8 +518,11 @@ pub(crate) async fn create_cmd_start_provide(
 
 // End of dragoon command implementation
 
-fn handle_dragoon_error(err: anyhow::Error, command: &str) -> Response {
-    let err_msg = format!("Got error from command `{}`: {}", command, err);
+fn handle_dragoon_error<E>(err: E, command: &str) -> Response
+where
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    let err_msg = format!("Got error from command `{}`: {:?}", command, err);
     error!(err_msg);
     DragoonError::UnexpectedError(err_msg).into_response()
 }

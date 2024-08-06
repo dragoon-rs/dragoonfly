@@ -4,14 +4,20 @@ mod dragoon_network;
 mod error;
 mod peer_block_info;
 mod send_block_to;
+mod send_strategy;
+mod send_strategy_impl;
 mod to_serialize;
 
 use axum::routing::get;
 use axum::Router;
+use clap::Parser;
 use libp2p::identity;
 use libp2p::identity::Keypair;
 use std::sync::Arc;
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::PathBuf,
+};
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -22,6 +28,45 @@ use ark_bls12_381::{Fr, G1Projective};
 use ark_poly::univariate::DensePolynomial;
 
 use crate::dragoon_network::DragoonNetwork;
+
+#[derive(Parser)]
+#[command(name = "Dragoonfly")]
+#[command(version = "1.0")]
+#[command(about = "A Provable Coded P2P System", long_about = None)]
+struct Cli {
+    #[arg(long, short)]
+    powers_path: PathBuf,
+    #[arg(long, short, default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3000))]
+    ip_port: SocketAddr,
+    #[arg(long, short, default_value_t = 0)]
+    seed: u8,
+    #[arg(long, default_value_t = 20)]
+    storage_space: usize,
+    #[arg(long, default_value_t = Units::G, help = "Known units are B, K, M, G, T")]
+    storage_unit: Units,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, clap::ValueEnum)]
+#[clap(rename_all = "UPPER")]
+enum Units {
+    B,
+    K,
+    M,
+    G,
+    T,
+}
+
+impl std::fmt::Display for Units {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Units::B => write!(f, "B"),
+            Units::K => write!(f, "K"),
+            Units::M => write!(f, "M"),
+            Units::G => write!(f, "G"),
+            Units::T => write!(f, "T"),
+        }
+    }
+}
 
 #[tokio::main]
 pub(crate) async fn main() -> Result<()> {
@@ -76,42 +121,38 @@ pub(crate) async fn main() -> Result<()> {
         .route("/get-blocks-info-from/:peer_id_base_58/:file_hash", get(commands::create_cmd_get_blocks_info_from))
         .route("/node-info", get(commands::create_cmd_node_info))
         .route("/send-block-to/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_send_block_to))
-        .route("/get-available-storage", get(commands::create_cmd_get_available_storage));
+        .route("/get-available-storage", get(commands::create_cmd_get_available_storage))
+        .route("/send-block-list/:strategy_name/:file_hash/:block_list", get(commands::create_cmd_send_block_list));
 
     let router = router.with_state(Arc::new(app::AppState::new(cmd_sender.clone())));
 
-    let powers_path: PathBuf = if let Some(powers_path) = std::env::args().nth(1) {
-        powers_path
-    } else {
-        panic!("No path has been provided for the powers")
-    }
-    .parse()
-    .unwrap();
+    info!("Parsing the command line arguments");
+    let cli = Cli::parse();
 
-    let ip_port: SocketAddr = if let Some(ip_port) = std::env::args().nth(2) {
-        ip_port
-    } else {
-        "127.0.0.1:3000".to_string()
-    }
-    .parse()
-    .unwrap();
+    let powers_path = cli.powers_path;
+    let ip_port: SocketAddr = cli.ip_port;
+    let seed = cli.seed;
 
-    let id = if let Some(id) = std::env::args().nth(3) {
-        id.parse::<u8>().unwrap()
-    } else {
-        0
+    let multiplier = match cli.storage_unit {
+        Units::B => 1,
+        Units::K => 10usize.pow(3),
+        Units::M => 10usize.pow(6),
+        Units::G => 10usize.pow(9),
+        Units::T => 10usize.pow(12),
     };
+    let total_available_storage_for_send = cli.storage_space * multiplier;
 
     let http_server = axum::Server::bind(&ip_port).serve(router.into_make_service());
+    info!("Spawning the http server");
     tokio::spawn(http_server);
 
-    let kp = get_keypair(id);
+    let kp = get_keypair(seed);
     let peer_id = kp.public().to_peer_id();
     info!("IP/port: {}", ip_port);
-    info!("Peer ID: {} ({})", peer_id, id);
+    info!("Peer ID: {} ({})", peer_id, seed);
 
+    info!("Creating the swarm");
     let swarm = dragoon_network::create_swarm(kp).await?;
-    let total_available_storage_for_send = 20usize * 10usize.pow(9); // 20 GB for storing send blocks
     let network = DragoonNetwork::new(
         swarm,
         cmd_receiver,
@@ -122,6 +163,7 @@ pub(crate) async fn main() -> Result<()> {
         false,
     );
 
+    info!("Running the network");
     tokio::spawn(network.run::<Fr, G1Projective, DensePolynomial<Fr>>());
 
     let shutdown = signal::ctrl_c();

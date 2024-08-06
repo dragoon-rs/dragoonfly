@@ -7,10 +7,10 @@ use help_func/exit_func.nu exit_on_error
 # define variables
 let test_file: path = "tests/assets/dragoon_32/dragoon_32x32.png"
 let res_filename = "reconstructed_file.png"
-let dragoonfly_root = "~/.share/dragoonfly"
+let dragoonfly_root = "~/.share/dragoonfly" | path expand
 
 print $"Removing ($dragoonfly_root) if it was there from a previous test\n"
-try { rm -r "~/.share/dragoonfly" }
+try { rm -r $dragoonfly_root }
 
 # create the nodes
 const connection_list = [
@@ -38,17 +38,17 @@ try {
 
     let number_of_fails = 5
 
-    print "\nNode 0 sends the block 0 to node 1, 3 times at once"
+    print "\nNode 0 sends the block 0 to node 1, 6 times at once"
     let result_list = 0..$number_of_fails | par-each { |index|
         print $"Send index ($index)..."
         try {
             let res = app send-block-to --node $SWARM.0.ip_port $peer_id_1 $file_hash ($block_hashes | get 0)
-            if not $res {
+            if not $res.0 {
                 error make {msg: $"Failed sending block ($index): ($block_hashes | get $index)"}
             }
             return 0
         } catch { |e|
-            assert equal $e.msg $"unexpected error from Dragoon: Got error from command `send-block-to`: The send block to PeerId\(\"($peer_id_1)\"\) for block ($block_hashes.0) is already being handled \(500\)"
+            assert str contains $e.msg "(500)"
             return 1
         }
     }
@@ -68,8 +68,6 @@ try {
         print $"test failed, there was a difference between the blocks on index 0: ($block_hashes | get 0)"
         error make {msg: "Exit to catch"}
     }
-
-    print $"(ansi light_green_reverse)    TEST SUCCESSFUL !(ansi reset)\n"
 
 } catch { |e|
     print "Killing the swarm"

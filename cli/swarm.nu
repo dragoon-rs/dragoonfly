@@ -1,21 +1,52 @@
 use std log
+use std repeat
 
 const NAME = "dragoonfly"
 const LOG_DIR = ($nu.temp-path | path join $NAME)
 const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
 
 # create a swarm table
-export def "swarm create" [n: int]: nothing -> table {
-    seq 0 ($n - 1) | each { {
-        ip_port: $"127.0.0.1:(3_000 + $in)",
-        seed: $in,
-        multiaddr: $"/ip4/127.0.0.1/tcp/(31_200 + $in)",
+export def "swarm create" [
+    n: int,
+    --storage_space: list<int>,
+    --unit_list: list<string>,
+    ]: nothing -> table {
+    if $storage_space != null {
+        if ($storage_space | length) != $n {
+            error make --unspanned {
+                msg: "If a list of storage space is provided, it should be the same size as the number of nodes"
+            }
+        }
+        if $unit_list != null {
+            if ($unit_list | length) != $n {
+                error make --unspanned {
+                    msg: "If a list of unit is provided, it should be the same size as the number of nodes"
+                }
+            }
+        }
+        
+    }
+    let storage_space = match $storage_space {
+        null => (20 | repeat $n),
+        _ => $storage_space,
+    }
+    let unit_list = match $unit_list {
+        null => ("G" | repeat $n),
+        _ => $unit_list,
+    }
+    
+    seq 0 ($n - 1) | each { |index| {
+        ip_port: $"127.0.0.1:(3_000 + $index)",
+        seed: $index,
+        multiaddr: $"/ip4/127.0.0.1/tcp/(31_200 + $index)",
+        storage: ($storage_space | get $index)
+        unit: ($unit_list | get $index)
     } }
 }
 
 # run a swarm
 export def "swarm run" [
-    swarm: table<ip_port: string, seed: int, multiaddr: string>, # the table of nodes to run
+    swarm: table<ip_port: string, seed: int, multiaddr: string, storage: int>, # the table of nodes to run
     --features: list<string> = [], # features to include in the nodes
     --no-shell
 ]: nothing -> string {
@@ -36,8 +67,8 @@ export def "swarm run" [
         log info $"launching node ($node.seed) \(($node.ip_port)\)"
         ^bash -c (
             $"cargo run --features '($features | str join ',')' "
-          + $"-- ($POWERS_PATH) ($node.ip_port) ($node.seed) "
-          + $"1> ($log_dir)/($node.seed).log 2> /dev/null &"
+          + $"-- --powers-path ($POWERS_PATH) --ip-port ($node.ip_port) --seed ($node.seed) --storage-space ($node.storage) --storage-unit ($node.unit)"
+          + $" 1> ($log_dir)/($node.seed).log 2> /dev/null &"
         )
     }
 

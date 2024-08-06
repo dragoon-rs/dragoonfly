@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Json, Response};
 use libp2p::{swarm::NetworkInfo, Multiaddr, PeerId};
 use serde::ser::Serialize;
 
+use crate::send_strategy::SendId;
 use crate::{
     commands::SerNetworkInfo, dragoon_network::BlockResponse, peer_block_info::PeerBlockInfo,
 };
@@ -30,7 +31,7 @@ macro_rules! impl_Convert {
 }
 
 // impl convert for all the types that are already Serialize and thus just return themselves
-impl_Convert!(for u64, String, bool, &str, Vec<Multiaddr>, Vec<u8>, (String, String), PeerBlockInfo, BlockResponse, PathBuf, usize);
+impl_Convert!(for u64, String, bool, &str, Vec<Multiaddr>, Vec<u8>, PeerBlockInfo, BlockResponse, PathBuf, usize);
 
 impl ConvertSer for PeerId {
     fn convert_ser(&self) -> impl Serialize {
@@ -70,6 +71,39 @@ where
         self.iter()
             .map(|convertable| convertable.convert_ser())
             .collect::<Vec<_>>()
+    }
+}
+
+// I tried to find a way to impl for T: ConvertSer but due to opaque return types in the match statement it doesn't seem to be possible
+// And none of the trait are object safe either so that's not a solution
+impl ConvertSer for Option<PeerId> {
+    fn convert_ser(&self) -> impl Serialize {
+        match self {
+            Some(peer_id) => peer_id.to_base58(),
+            None => String::from("None"),
+        }
+    }
+}
+
+impl ConvertSer for SendId {
+    fn convert_ser(&self) -> impl Serialize {
+        let SendId {
+            peer_id,
+            file_hash,
+            block_hash,
+        } = self;
+        (peer_id.to_base58(), file_hash, block_hash)
+    }
+}
+
+impl<U, V> ConvertSer for (U, V)
+where
+    U: ConvertSer,
+    V: ConvertSer,
+{
+    fn convert_ser(&self) -> impl Serialize {
+        let (u, v) = self;
+        (u.convert_ser(), v.convert_ser())
     }
 }
 

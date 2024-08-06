@@ -1,10 +1,12 @@
 use anyhow::{self, format_err, Result};
+use futures::pin_mut;
 use futures::prelude::*;
-use futures::stream::BoxStream;
+use futures::stream::{self as f_stream, BoxStream, FusedStream};
 use libp2p::core::ConnectedPoint;
 use tokio::fs as tfs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time;
 
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
@@ -25,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs as sfs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -32,13 +35,15 @@ use std::sync::{
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
-use crate::commands::{DragoonCommand, EncodingMethod, Sender, SenderMPSC};
+use crate::commands::{sender_send_match, DragoonCommand, EncodingMethod, Sender, SenderMPSC};
 use crate::error::DragoonError::{
-    BadListener, BootstrapError, CouldNotSendBlockResponse, CouldNotSendInfoResponse, DialError,
-    NoParentDirectory, ProviderError,
+    self, BadListener, BootstrapError, CouldNotSendBlockResponse, CouldNotSendInfoResponse,
+    DialError, NoParentDirectory, ProviderError, SendBlockToAlreadyStarted, SendBlockToError,
 };
 use crate::peer_block_info::PeerBlockInfo;
 use crate::send_block_to::{self, SendBlockHandler};
+use crate::send_strategy::{SendId, SendStrategy};
+use crate::send_strategy_impl::{self, StrategyName};
 
 use komodo::{
     self,
@@ -142,6 +147,7 @@ pub(crate) struct DragoonNetwork {
     powers_path: PathBuf,
     current_available_storage_for_send: Arc<AtomicUsize>,
     current_total_size_of_blocks_on_disk: Arc<AtomicUsize>,
+    known_peer_id: HashSet<PeerId>,
     pending_dial: HashMap<String, Sender<()>>,
     pending_send_block_to: HashSet<(PeerId, String)>,
     pending_start_providing: HashMap<kad::QueryId, Sender<()>>,
@@ -172,6 +178,7 @@ impl DragoonNetwork {
                 total_available_storage_for_send,
             )),
             current_total_size_of_blocks_on_disk: Arc::new(AtomicUsize::new(0)),
+            known_peer_id: Default::default(),
             pending_dial: Default::default(),
             pending_send_block_to: Default::default(),
             pending_start_providing: Default::default(),
@@ -309,18 +316,7 @@ impl DragoonNetwork {
                 info!("Started providing {:?}", result_ok);
                 if let Some(sender) = self.pending_start_providing.remove(&id) {
                     debug!("Sending empty response");
-                    if match sender {
-                        Sender::SenderMPSC(sender) => {
-                            sender.send(Ok(())).map_err(|_| format_err!(""))
-                        }
-                        Sender::SenderOneS(sender) => {
-                            sender.send(Ok(())).map_err(|_| format_err!(""))
-                        }
-                    }
-                    .is_err()
-                    {
-                        error!("Could not send the result of the StartProviding query result");
-                    }
+                    sender_send_match(sender, Ok(()), String::from("StartProviding"));
                 } else {
                     warn!("Could not find id = {} in the start providers", id);
                 }
@@ -417,6 +413,7 @@ impl DragoonNetwork {
                         .behaviour_mut()
                         .kademlia
                         .add_address(&peer_id, addr.clone());
+                    self.known_peer_id.insert(peer_id);
                     info!("Added peer {}", peer_id);
                 } else {
                     error!("Peer {} not added, no listen address", peer_id);
@@ -438,18 +435,11 @@ impl DragoonNetwork {
                     response,
                 } => {
                     if let Some(sender) = self.pending_request_block.remove(&request_id) {
-                        if match sender {
-                            Sender::SenderMPSC(sender) => {
-                                sender.send(Ok(response)).map_err(|_| format_err!(""))
-                            }
-                            Sender::SenderOneS(sender) => {
-                                sender.send(Ok(response)).map_err(|_| format_err!(""))
-                            }
-                        }
-                        .is_err()
-                        {
-                            error!("Couldn't send the result of the message response operation of id {}", request_id);
-                        }
+                        sender_send_match(
+                            sender,
+                            Ok(response),
+                            format!("message response {}", request_id),
+                        );
                     } else {
                         error!(
                             "Could no find the sender associated with {} for the message response",
@@ -461,59 +451,39 @@ impl DragoonNetwork {
             SwarmEvent::Behaviour(DragoonBehaviourEvent::RequestInfo(Event::Message {
                 peer: _,
                 message,
-            })) => {
-                match message {
-                    Message::Request {
-                        request, channel, ..
-                    } => {
-                        debug!("Received a request for block info: {:?}", request);
-                        if let Err(e) = self.info_request(request, channel).await {
-                            error!("{}", e)
-                        }
-                    }
-                    Message::Response {
-                        request_id,
-                        response,
-                    } => {
-                        if let Some(sender) = self.pending_request_block_info.remove(&request_id) {
-                            if match sender {
-                                Sender::SenderMPSC(sender) => {
-                                    sender.send(Ok(response.0)).map_err(|_| format_err!(""))
-                                }
-                                Sender::SenderOneS(sender) => {
-                                    sender.send(Ok(response.0)).map_err(|_| format_err!(""))
-                                }
-                            }
-                            .is_err()
-                            {
-                                error!("Couldn't send the result of the info response operation of id {}", request_id);
-                            }
-                        } else {
-                            error!(
-                                "Could no find the sender associated with {} for the info response",
-                                request_id
-                            );
-                        }
+            })) => match message {
+                Message::Request {
+                    request, channel, ..
+                } => {
+                    debug!("Received a request for block info: {:?}", request);
+                    if let Err(e) = self.info_request(request, channel).await {
+                        error!("{}", e)
                     }
                 }
-            }
+                Message::Response {
+                    request_id,
+                    response,
+                } => {
+                    if let Some(sender) = self.pending_request_block_info.remove(&request_id) {
+                        sender_send_match(
+                            sender,
+                            Ok(response.0),
+                            format!("info response {}", request_id),
+                        );
+                    } else {
+                        error!(
+                            "Could no find the sender associated with {} for the info response",
+                            request_id
+                        );
+                    }
+                }
+            },
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => match endpoint {
                 ConnectedPoint::Dialer { address, .. } => {
                     if let Some(sender) = self.pending_dial.remove(&address.to_string()) {
-                        if match sender {
-                            Sender::SenderMPSC(sender) => {
-                                sender.send(Ok(())).map_err(|_| format_err!(""))
-                            }
-                            Sender::SenderOneS(sender) => {
-                                sender.send(Ok(())).map_err(|_| format_err!(""))
-                            }
-                        }
-                        .is_err()
-                        {
-                            error!("Couldn't send the result of the dial operation to the peer of multiaddr {}", address);
-                        }
+                        sender_send_match(sender, Ok(()), format!("dial {}", address));
                     } else {
                         error!(
                                 "Could no find the sender associated with the multiaddr dial {} for the dial response (this might be due to a double dial attempt to the same node)",
@@ -606,79 +576,32 @@ where {
         match cmd {
             DragoonCommand::Listen { multiaddr, sender } => {
                 let res = self.listen(multiaddr).await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the listen operation")
-                }
+                sender_send_match(sender, res, String::from("listen"));
             }
             DragoonCommand::GetListeners { sender } => {
                 let listeners = self.swarm.listeners().cloned().collect::<Vec<Multiaddr>>();
 
                 debug!("sending listeners {:?}", listeners);
-                if match sender {
-                    Sender::SenderMPSC(sender) => {
-                        sender.send(Ok(listeners)).map_err(|_| format_err!(""))
-                    }
-                    Sender::SenderOneS(sender) => {
-                        sender.send(Ok(listeners)).map_err(|_| format_err!(""))
-                    }
-                }
-                .is_err()
-                {
-                    error!("Could not send list of listeners");
-                }
+                sender_send_match(sender, Ok(listeners), String::from("get listeners"));
             }
             DragoonCommand::GetPeerId { sender } => {
                 let peer_id = *self.swarm.local_peer_id();
 
                 debug!("sending peer_id {}", peer_id);
-                if match sender {
-                    Sender::SenderMPSC(sender) => {
-                        sender.send(Ok(peer_id)).map_err(|_| format_err!(""))
-                    }
-                    Sender::SenderOneS(sender) => {
-                        sender.send(Ok(peer_id)).map_err(|_| format_err!(""))
-                    }
-                }
-                .is_err()
-                {
-                    error!("Could not send peer ID");
-                }
+                sender_send_match(sender, Ok(peer_id), String::from("GetPeerId"));
             }
             DragoonCommand::GetNetworkInfo { sender } => {
                 let network_info = self.swarm.network_info();
 
                 debug!("sending network info {:?}", network_info);
-                if match sender {
-                    Sender::SenderMPSC(sender) => {
-                        sender.send(Ok(network_info)).map_err(|_| format_err!(""))
-                    }
-                    Sender::SenderOneS(sender) => {
-                        sender.send(Ok(network_info)).map_err(|_| format_err!(""))
-                    }
-                }
-                .is_err()
-                {
-                    error!("Could not send network info");
-                }
+                sender_send_match(sender, Ok(network_info), String::from("GetNetworkInfo"));
             }
             DragoonCommand::RemoveListener {
                 listener_id,
                 sender,
             } => {
                 let res = self.remove_listener(listener_id).await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the remove_listener operation")
-                }
+                sender_send_match(sender, res, String::from("RemoveListener"));
             }
             DragoonCommand::GetConnectedPeers { sender } => {
                 info!("Getting list of connected peers");
@@ -689,18 +612,11 @@ where {
                     .collect::<Vec<PeerId>>();
 
                 debug!("sending connected_peers {:?}", connected_peers);
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender
-                        .send(Ok(connected_peers))
-                        .map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender
-                        .send(Ok(connected_peers))
-                        .map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send list of connected peers");
-                }
+                sender_send_match(
+                    sender,
+                    Ok(connected_peers),
+                    String::from("GetConnectedPeers"),
+                );
             }
             DragoonCommand::GetFile {
                 file_hash,
@@ -718,35 +634,14 @@ where {
                         powers_path,
                     )
                     .await;
-                    if match sender {
-                        Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                        Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    }
-                    .is_err()
-                    {
-                        error!(
-                            "Could not send the result of the get_file {} operation",
-                            file_hash
-                        )
-                    }
+                    sender_send_match(sender, res, format!("GetFile {}", file_hash));
                 });
             }
             DragoonCommand::DialSingle { multiaddr, sender } => {
                 if !self.pending_dial.contains_key(&multiaddr) {
                     let res = self.dial(multiaddr.clone()).await;
                     if res.is_err() {
-                        if match sender {
-                            Sender::SenderMPSC(sender) => {
-                                sender.send(res).map_err(|_| format_err!(""))
-                            }
-                            Sender::SenderOneS(sender) => {
-                                sender.send(res).map_err(|_| format_err!(""))
-                            }
-                        }
-                        .is_err()
-                        {
-                            error!("Could not send the error result of the dial operation")
-                        }
+                        sender_send_match(sender, res, String::from("DialSingle (error)"));
                     } else {
                         // need to check again even though we already did, because there was an await inbetween (and thus a potential modification of the hash_map)
                         if let std::collections::hash_map::Entry::Vacant(e) =
@@ -801,30 +696,12 @@ where {
                         "Could not send the result of the dial_multiple operation: {:?}",
                         final_res
                     );
-                    if match sender {
-                        Sender::SenderMPSC(sender) => {
-                            sender.send(final_res).map_err(|_| format_err!(""))
-                        }
-                        Sender::SenderOneS(sender) => {
-                            sender.send(final_res).map_err(|_| format_err!(""))
-                        }
-                    }
-                    .is_err()
-                    {
-                        error!(err_msg);
-                    }
+                    sender_send_match(sender, final_res, err_msg);
                 });
             }
             DragoonCommand::AddPeer { multiaddr, sender } => {
                 let res = self.add_peer(multiaddr).await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the add_peer operation")
-                }
+                sender_send_match(sender, res, String::from("AddPeer"));
             }
             DragoonCommand::StartProvide { key, sender } => {
                 if let Ok(query_id) = self
@@ -839,18 +716,7 @@ where {
                     let err = ProviderError(format!("Could not provide {}", key));
 
                     debug!("sending error {}", err);
-                    if match sender {
-                        Sender::SenderMPSC(sender) => sender
-                            .send(Err(format_err!(err)))
-                            .map_err(|_| format_err!("")),
-                        Sender::SenderOneS(sender) => sender
-                            .send(Err(format_err!(err)))
-                            .map_err(|_| format_err!("")),
-                    }
-                    .is_err()
-                    {
-                        error!("Could not send result");
-                    }
+                    sender_send_match(sender, Err(format_err!(err)), String::from("StartProvide"));
                 }
             }
             DragoonCommand::GetProviders { key, sender } => {
@@ -861,30 +727,12 @@ where {
                     while let Some(provider) = provider_stream.next().await {
                         all_providers.push(provider);
                     }
-                    if match sender {
-                        Sender::SenderMPSC(sender) => {
-                            sender.send(Ok(all_providers)).map_err(|_| format_err!(""))
-                        }
-                        Sender::SenderOneS(sender) => {
-                            sender.send(Ok(all_providers)).map_err(|_| format_err!(""))
-                        }
-                    }
-                    .is_err()
-                    {
-                        error!("Could not send the result of the GetProviders command");
-                    }
+                    sender_send_match(sender, Ok(all_providers), String::from("GetProviders"));
                 });
             }
             DragoonCommand::Bootstrap { sender } => {
                 let res = self.bootstrap().await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the bootstrap operation")
-                }
+                sender_send_match(sender, res, String::from("Bootstrap"));
             }
             DragoonCommand::GetBlockFrom {
                 peer_id,
@@ -908,15 +756,7 @@ where {
             } => self.get_blocks_info_from(peer_id, file_hash, sender),
             DragoonCommand::GetBlockList { file_hash, sender } => {
                 let res = Self::get_block_list(self.file_dir.clone(), file_hash).await;
-
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the get_block_list operation")
-                }
+                sender_send_match(sender, res, String::from("GetBlocksInfoFrom"));
             }
             DragoonCommand::DecodeBlocks {
                 block_dir,
@@ -930,14 +770,7 @@ where {
                     output_filename,
                 )
                 .await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the decode_blocks operation")
-                }
+                sender_send_match(sender, res, String::from("DecodeBlocks"));
             }
             DragoonCommand::EncodeFile {
                 file_path,
@@ -958,47 +791,19 @@ where {
                     powers_path,
                 )
                 .await;
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the encode_file operation")
-                }
+                sender_send_match(sender, res, String::from("EncodeFile"));
             }
             DragoonCommand::GetBlockDir { file_hash, sender } => {
                 let res = Ok(get_block_dir(&self.file_dir.clone(), file_hash));
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the get_block_dir operation")
-                }
+                sender_send_match(sender, res, String::from("GetBlockDir"));
             }
             DragoonCommand::GetFileDir { file_hash, sender } => {
                 let res = Ok(get_file_dir(&self.file_dir.clone(), file_hash));
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the get_file_dir operation")
-                }
+                sender_send_match(sender, res, String::from("GetFileDir"));
             }
             DragoonCommand::NodeInfo { sender } => {
                 let res = Ok(*(self.swarm.local_peer_id()));
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the node_info operation")
-                }
+                sender_send_match(sender, res, String::from("NodeInfo"));
             }
             DragoonCommand::SendBlockTo {
                 peer_id,
@@ -1016,24 +821,73 @@ where {
                     self.send_block_to(peer_id, block_hash, file_hash, sender);
                     //TODO remove the entry from the hash table once we are done, use a command ?
                 } else {
-                    let err = Err(format_err!(
-                        "The send block to {:?} for block {} is already being handled",
+                    let send_id = SendId {
                         peer_id,
-                        block_hash
-                    ));
-                    let err_msg = format!(
-                        "Could not send the error result of the send_block_to operation: {:?}",
-                        err
-                    );
-                    if match sender {
-                        Sender::SenderMPSC(sender) => sender.send(err).map_err(|_| format_err!("")),
-                        Sender::SenderOneS(sender) => sender.send(err).map_err(|_| format_err!("")),
-                    }
-                    .is_err()
-                    {
-                        error!(err_msg);
-                    }
+                        file_hash,
+                        block_hash,
+                    };
+                    let err = Err(SendBlockToAlreadyStarted { send_id });
+
+                    sender_send_match(sender, err, String::from("SendBlockTo (error)"));
                 }
+            }
+            DragoonCommand::SendBlockList {
+                strategy_name,
+                file_hash,
+                block_list,
+                sender,
+            } => {
+                let number_of_blocks_to_send = block_list.len();
+                //not my proudest line with a dynamic type cast
+                let send_stream: Pin<Box<dyn FusedStream<Item = SendId> + Send>> =
+                    match strategy_name {
+                        StrategyName::Random => {
+                            let known_peers = self.known_peer_id.clone().into_iter();
+                            let peer_input_stream = f_stream::iter(known_peers).fuse();
+                            let size_of_block_list = block_list.len();
+                            let block_input_stream = f_stream::iter(
+                                vec![file_hash; size_of_block_list]
+                                    .into_iter()
+                                    .zip(block_list),
+                            )
+                            .fuse();
+                            let random_distribution =
+                                Box::<send_strategy_impl::random::RandomDistribution>::default();
+                            Box::pin(random_distribution.get_send_stream(
+                                Box::pin(peer_input_stream),
+                                Box::pin(block_input_stream),
+                            ))
+                        }
+                        StrategyName::RoundRobin => {
+                            let mut known_peers =
+                                self.known_peer_id.clone().into_iter().collect::<Vec<_>>();
+                            //sort to ensure the ordering for the tests is not random
+                            known_peers.sort();
+                            let known_peers = known_peers.into_iter();
+                            let peer_input_stream = f_stream::iter(known_peers).fuse();
+                            let size_of_block_list = block_list.len();
+                            let block_input_stream = f_stream::iter(
+                                vec![file_hash; size_of_block_list]
+                                    .into_iter()
+                                    .zip(block_list),
+                            )
+                            .fuse();
+                            let robin_distribution = Box::<
+                                send_strategy_impl::round_robin::RobinDistribution,
+                            >::default();
+                            Box::pin(robin_distribution.get_send_stream(
+                                Box::pin(peer_input_stream),
+                                Box::pin(block_input_stream),
+                            ))
+                        }
+                    };
+                let cmd_sender = self.command_sender.clone();
+                tokio::spawn(async move {
+                    let res =
+                        Self::send_block_list(number_of_blocks_to_send, send_stream, cmd_sender)
+                            .await;
+                    sender_send_match(sender, res, String::from("SendBlockList"));
+                });
             }
             DragoonCommand::RemoveEntryFromSendBlockToSet {
                 peer_id,
@@ -1041,62 +895,24 @@ where {
                 sender,
             } => {
                 self.pending_send_block_to.remove(&(peer_id, block_hash));
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender.send(Ok(())).map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender.send(Ok(())).map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the remove_entry_from_send_block_to_set operation")
-                }
+                sender_send_match(
+                    sender,
+                    Ok(()),
+                    String::from("RemoveEntryFromSendBlockToSet"),
+                );
             }
             DragoonCommand::GetAvailableStorage { sender } => {
                 let available_storage = self
                     .current_available_storage_for_send
                     .load(Ordering::Relaxed);
-                if match sender {
-                    Sender::SenderMPSC(sender) => sender
-                        .send(Ok(available_storage))
-                        .map_err(|_| format_err!("")),
-                    Sender::SenderOneS(sender) => sender
-                        .send(Ok(available_storage))
-                        .map_err(|_| format_err!("")),
-                }
-                .is_err()
-                {
-                    error!("Could not send the result of the get_available_storage operation")
-                }
+                sender_send_match(
+                    sender,
+                    Ok(available_storage),
+                    String::from("GetAvailableStorage"),
+                );
             }
         }
     }
-
-    // * keeping for later for the logic of block read and serialize
-    // async fn put_record(&mut self, block_hash: String, block_dir: String) -> Result<QueryId> {
-    //     let block = fs::read_blocks::<F, G>(
-    //         &[block_hash.clone()],
-    //         Path::new(&block_dir),
-    //         Compress::Yes,
-    //         Validate::Yes,
-    //     )?[0]
-    //         .clone()
-    //         .1;
-    //     let mut buf = vec![0; block.serialized_size(Compress::Yes)];
-    //     block.serialize_with_mode(&mut buf[..], Compress::Yes)?;
-    //     let record = kad::Record {
-    //         key: block_hash.into_bytes().into(),
-    //         value: buf,
-    //         publisher: None,
-    //         expires: None,
-    //     };
-    //     info!("Putting record {:?} in a kad record", record);
-    //     let id = self
-    //         .swarm
-    //         .behaviour_mut()
-    //         .kademlia
-    //         .put_record(record, kad::Quorum::One)?;
-
-    //     Ok(id)
-    // }
 
     async fn listen(&mut self, multiaddr: String) -> Result<u64> {
         if let Ok(addr) = multiaddr.parse() {
@@ -1511,7 +1327,7 @@ where {
         peer_id: PeerId,
         block_hash: String,
         file_hash: String,
-        sender: Sender<bool>,
+        sender: Sender<(bool, SendId), DragoonError>,
     ) {
         let mut control = self.swarm.behaviour().send_block.new_control();
         let own_peer_id = *self.swarm.local_peer_id();
@@ -1528,11 +1344,13 @@ where {
             let res = send_block_to::send_block_to(
                 stream,
                 own_peer_id,
+                peer_id,
                 block_hash.clone(),
                 file_hash,
                 file_dir,
             )
-            .await;
+            .await
+            .map_err(|send_id| SendBlockToError { send_id });
             let (remove_sender, remove_receiver) = oneshot::channel();
             if cmd_sender
                 .send(DragoonCommand::RemoveEntryFromSendBlockToSet {
@@ -1542,20 +1360,349 @@ where {
                 })
                 .is_err()
             {
-                error!("Could not send the request to remove the entry in the table of pending_send_block_to corresponding to ({}, {})", peer_id, block_hash)
+                error!(
+                    "Could not send the request to remove the entry in the table of pending_send_block_to corresponding to ({}, {})", 
+                    peer_id, block_hash
+                )
             }
 
             let _ = remove_receiver.await;
-
-            if match sender {
-                Sender::SenderMPSC(sender) => sender.send(res).map_err(|_| format_err!("")),
-                Sender::SenderOneS(sender) => sender.send(res).map_err(|_| format_err!("")),
-            }
-            .is_err()
-            {
-                error!("Could not send the result of the send_block_to operation")
-            }
+            sender_send_match(sender, res, String::from("SendBlockTo"));
         });
+    }
+
+    async fn send_block_list(
+        number_of_blocks_to_send: usize,
+        send_stream: impl FusedStream<Item = SendId>,
+        cmd_sender: mpsc::UnboundedSender<DragoonCommand>,
+    ) -> Result<Vec<SendId>, DragoonError> {
+        let mut final_block_distribution: Vec<SendId> = Default::default();
+        let mut rejected_blocks: Vec<(String, String)> = Default::default();
+        let mut accepted_peers: HashSet<PeerId> = Default::default();
+        let mut rejected_peers: HashSet<PeerId> = Default::default();
+
+        fn send_block_to_loc(
+            peer_id: PeerId,
+            file_hash: String,
+            block_hash: String,
+            cmd_sender: mpsc::UnboundedSender<DragoonCommand>,
+            res_sender: mpsc::UnboundedSender<Result<(bool, SendId), DragoonError>>,
+        ) {
+            let err_msg = format!(
+                "Could not send the command SendBlockTo to {} for file_hash {} block_hash {}",
+                peer_id, file_hash, block_hash
+            );
+            if cmd_sender
+                .send(DragoonCommand::SendBlockTo {
+                    peer_id,
+                    file_hash,
+                    block_hash,
+                    sender: Sender::SenderMPSC(res_sender),
+                })
+                .is_err()
+            {
+                error!(err_msg)
+            }
+        }
+
+        async fn optimistic_loop(
+            send_stream: impl FusedStream<Item = SendId>,
+            cmd_sender: mpsc::UnboundedSender<DragoonCommand>,
+            number_of_blocks_to_send: &usize,
+            accepted_peers: &mut HashSet<PeerId>,
+            rejected_peers: &mut HashSet<PeerId>,
+            rejected_blocks: &mut Vec<(String, String)>,
+            final_block_distribution: &mut Vec<SendId>,
+        ) -> Result<()> {
+            let (res_sender, mut res_recv) = mpsc::unbounded_channel();
+
+            pin_mut!(send_stream);
+            let mut res_sender_vec: Vec<_> = std::iter::repeat(res_sender)
+                .take(*number_of_blocks_to_send)
+                .collect();
+
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(send_info) = send_stream.next() => {
+                        let SendId{peer_id, file_hash, block_hash} = send_info;
+                        let res_sender = match res_sender_vec.pop() {
+                            Some(res_sender) => res_sender,
+                            None => {
+                                let err_msg = format!(
+                                    "There were more blocks to be sent than the expected number to send for file {}",
+                                    file_hash
+                                );
+                                error!(err_msg);
+                                return Err(format_err!(err_msg));
+                            }
+                        };
+                        send_block_to_loc(
+                            peer_id,
+                            file_hash,
+                            block_hash,
+                            cmd_sender.clone(),
+                            res_sender
+                        );
+                    }
+                    Some(send_res) = res_recv.recv() => {
+                        match send_res {
+                            Ok((boolean, send_id)) => match boolean {
+                                true => {
+                                    // need to check because we can get a return from the peer refusing a block and accepting one later
+                                    // due to the order in which the streams are handled
+                                    if !rejected_peers.contains(&send_id.peer_id) {
+                                        let inserted_peer_set = accepted_peers.insert(send_id.peer_id);
+                                        debug!("inserted {} in accepted set : {}", send_id.peer_id, inserted_peer_set);
+                                    }
+                                    final_block_distribution.push(send_id)
+                                },
+                                false => {
+                                    let removed_accepted_peer_set = accepted_peers.remove(&send_id.peer_id);
+                                    debug!("removed {} from accepted set : {}", send_id.peer_id, removed_accepted_peer_set);
+                                    let inserted_reject_peer_set = rejected_peers.insert(send_id.peer_id);
+                                    debug!("inserted {} in rejected set : {}", send_id.peer_id, inserted_reject_peer_set);
+                                    rejected_blocks.push((send_id.file_hash, send_id.block_hash))
+                                },
+                            },
+                            Err(dragoon_error) => match dragoon_error {
+                                SendBlockToError{send_id} => rejected_blocks.push((send_id.file_hash, send_id.block_hash)),
+                                SendBlockToAlreadyStarted{send_id} => error!(
+                                    "Unexpected multiple send to {:?} for file hash {} block hash {}",
+                                    send_id.peer_id,
+                                    send_id.file_hash,
+                                    send_id.block_hash
+                                ),
+                                e => error!("Unexpected error for SendBlockTo: {}", e),
+                            },
+                        }
+                    },
+                    else => {
+
+                        info!("Finished the first loop of the SendBlockList call");
+                        res_recv.close();
+                        return Ok(())
+                    },
+                }
+            }
+        }
+
+        let timeout_duration = Duration::from_secs(10);
+
+        match time::timeout(
+            timeout_duration,
+            optimistic_loop(
+                send_stream,
+                cmd_sender.clone(),
+                &number_of_blocks_to_send,
+                &mut accepted_peers,
+                &mut rejected_peers,
+                &mut rejected_blocks,
+                &mut final_block_distribution,
+            ),
+        )
+        .await
+        {
+            Ok(result) => match result {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(DragoonError::SendBlockListFailed {
+                        final_block_distribution,
+                        context: e.to_string(),
+                    })
+                }
+            },
+            Err(_) => warn!("The first loop of send block to timed-out, attempting recuperation"),
+        }
+
+        fn handle_rejected_block(
+            maybe_peer_id: Option<PeerId>,
+            file_hash: String,
+            block_hash: String,
+            accepted_peers: &mut Vec<PeerId>,
+            accepted_peers_index: &mut usize,
+            cmd_sender: mpsc::UnboundedSender<DragoonCommand>,
+            res_sender: mpsc::UnboundedSender<Result<(bool, SendId), DragoonError>>,
+        ) -> Result<()> {
+            if let Some(peer_id) = maybe_peer_id {
+                // remove the peer that just rejected the block from the list of peers that previously accepted a peer
+                if let Some(index) = accepted_peers
+                    .iter()
+                    .position(|iter_peer_id| *iter_peer_id == peer_id)
+                {
+                    accepted_peers.remove(index); //using swap_remove would mess up the order and doesn't ensure all peers get an equivalent number of blocks
+                    if let Some(res) = accepted_peers_index.checked_sub(1) {
+                        *accepted_peers_index = res
+                    };
+                } else {
+                    debug!(
+                    "Tried to remove {} from the list of accepted peers but it was not in the list",
+                    peer_id
+                );
+                }
+            }
+
+            // take a new peer to send the block
+            let remaining_peer_number = accepted_peers.len();
+            let peer_id = match accepted_peers.get(*accepted_peers_index) {
+                Some(peer_id) => {
+                    *accepted_peers_index += 1;
+                    if *accepted_peers_index >= remaining_peer_number {
+                        *accepted_peers_index = 0
+                    };
+                    peer_id
+                }
+                // there are no more known peers that will accept blocks but we have blocks left to send
+                None => {
+                    if remaining_peer_number == 0 {
+                        return Err(anyhow::Error::msg(
+                            "No more peers to send but blocks are left",
+                        ));
+                    } else {
+                        return Err(format_err!(
+                            "Invalid get index on the list of accepted peers: remaining peer number is {} but the get index was {}",
+                            remaining_peer_number,
+                            *accepted_peers_index,
+                        ));
+                    }
+                }
+            };
+
+            send_block_to_loc(
+                *peer_id,
+                file_hash,
+                block_hash,
+                cmd_sender.clone(),
+                res_sender.clone(),
+            );
+            Ok(())
+        }
+
+        if rejected_blocks.is_empty() {
+            //checking for size because due to the timeout on the first loop it's possible
+            //that we end up not pushing anything to rejected blocks without having actually sent everything
+            if final_block_distribution.len() == number_of_blocks_to_send {
+                return Ok(final_block_distribution);
+            } else {
+                return Err(DragoonError::SendBlockListFailed{final_block_distribution, context: "The rejected block list is empty but not all blocks have been sent, unknown configuration".to_string()});
+            }
+        }
+
+        // recreate the sender (as it was consumed previously)
+        let (res_sender, mut res_recv) =
+            mpsc::unbounded_channel::<Result<(bool, SendId), DragoonError>>();
+
+        let mut accepted_peers_index = 0;
+        let mut accepted_peers: Vec<PeerId> = accepted_peers.into_iter().collect();
+
+        //ensure order stays the same for reproducibility purpose
+        accepted_peers.sort();
+
+        for (file_hash, block_hash) in rejected_blocks.clone() {
+            match handle_rejected_block(
+                None,
+                file_hash,
+                block_hash,
+                &mut accepted_peers,
+                &mut accepted_peers_index,
+                cmd_sender.clone(),
+                res_sender.clone(),
+            ) {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(DragoonError::SendBlockListFailed {
+                        final_block_distribution,
+                        context: e.to_string(),
+                    })
+                }
+            }
+        }
+
+        info!("Now entering error handling for blocks that were not sent");
+        'recuperation: while let Some(send_res) = res_recv.recv().await {
+            match send_res {
+                Ok((boolean, send_id)) => {
+                    if boolean {
+                        final_block_distribution.push(send_id.clone());
+                        // remove the block from the list of rejected blocks
+                        if let Some(index) =
+                            rejected_blocks.iter().position(|(file_hash, block_hash)| {
+                                (file_hash, block_hash) == (&send_id.file_hash, &send_id.block_hash)
+                            })
+                        {
+                            rejected_blocks.swap_remove(index);
+                        } else {
+                            error!(
+                                "Tried to remove {:?} from the list of rejected blocks but it was not in the list",
+                                (send_id.file_hash, send_id.block_hash)
+                            );
+                        }
+                    } else {
+                        // meaning the block got rejected
+                        let SendId {
+                            peer_id,
+                            file_hash,
+                            block_hash,
+                        } = send_id;
+                        match handle_rejected_block(
+                            Some(peer_id),
+                            file_hash,
+                            block_hash,
+                            &mut accepted_peers,
+                            &mut accepted_peers_index,
+                            cmd_sender.clone(),
+                            res_sender.clone(),
+                        ) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(DragoonError::SendBlockListFailed {
+                                    final_block_distribution,
+                                    context: e.to_string(),
+                                })
+                            }
+                        }
+                    }
+                }
+                Err(dragoon_error) => match dragoon_error {
+                    SendBlockToError { send_id } => {
+                        let SendId {
+                            peer_id,
+                            file_hash,
+                            block_hash,
+                        } = send_id;
+                        match handle_rejected_block(
+                            Some(peer_id),
+                            file_hash,
+                            block_hash,
+                            &mut accepted_peers,
+                            &mut accepted_peers_index,
+                            cmd_sender.clone(),
+                            res_sender.clone(),
+                        ) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(DragoonError::SendBlockListFailed {
+                                    final_block_distribution,
+                                    context: e.to_string(),
+                                })
+                            }
+                        }
+                    }
+                    SendBlockToAlreadyStarted { send_id } => error!(
+                        "Unexpected multiple send to {:?} for file hash {} block hash {}",
+                        send_id.peer_id, send_id.file_hash, send_id.block_hash
+                    ),
+                    e => error!("Unexpected error for SendBlockTo: {}", e),
+                },
+            }
+            if rejected_blocks.is_empty() {
+                res_recv.close();
+                break 'recuperation;
+            }
+        }
+        info!("Finished recuperation loop for send block list without further issues");
+
+        Ok(final_block_distribution)
     }
 }
 

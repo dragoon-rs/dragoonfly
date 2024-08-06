@@ -40,18 +40,14 @@ try {
     let original_storage_space = app get-available-storage --node $SWARM.1.ip_port
 
     print "\nNode 0 sends the blocks to node 1"
-    0..(($block_hashes | length) - 1) | par-each { |index|
-        print $"Sending block ($index)..."
-        let res = app send-block-to --node $SWARM.0.ip_port $peer_id_1 $file_hash ($block_hashes | get $index)
-        if not $res.0 {
-        error make {msg: $"Failed sending block ($index): ($block_hashes | get $index)"}
-        }
-    }
+    app send-block-list --node $SWARM.0.ip_port $file_hash $block_hashes
     print "Node 0 finished sending blocks to node 1\n"
 
     print "Checking that the reported available size makes sense with respect to the size of the blocks that were sent"
+    
     let new_storage_space = app get-available-storage --node $SWARM.1.ip_port
     let path = $"($dragoonfly_root)/($peer_id_0)/files/($file_hash)/blocks/"
+    print $path
     let size_of_all_sent_blocks = ls $path | get size | math sum | into int
     assert equal ($original_storage_space - $new_storage_space) $size_of_all_sent_blocks
     

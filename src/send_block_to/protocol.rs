@@ -23,6 +23,7 @@ use tracing::{debug, error, info, warn};
 
 use komodo::zk::Powers;
 
+use crate::send_strategy::SendId;
 use crate::{
     dragoon_network::{get_block_dir, get_powers},
     peer_block_info::PeerBlockInfo,
@@ -100,12 +101,37 @@ async fn send_block(
 /// Main function for the sender side, will attempt to send the block, can fail if the other end refuses to get the block.
 /// This is a oneshot try, meaning there is no logic behind to try to find another peer to get the block.
 pub(crate) async fn handle_send_block_exchange_sender_side(
-    mut stream: Stream, //TODO give a &mut stream instead so the caller can close the stream on all errors
+    stream: Stream, //TODO give a &mut stream instead so the caller can close the stream on all errors
     own_peer_id: PeerId,
+    recv_peer_id: PeerId,
     block_hash: String,
     file_hash: String,
     file_dir: PathBuf,
-) -> Result<bool> {
+) -> Result<(bool, SendId), SendId> {
+    handle_send_block_exchange_sender_side_inner(
+        stream,
+        own_peer_id,
+        recv_peer_id,
+        block_hash.clone(),
+        file_hash.clone(),
+        file_dir,
+    )
+    .await
+    .map_err(|_| SendId {
+        peer_id: recv_peer_id,
+        file_hash,
+        block_hash,
+    })
+}
+
+async fn handle_send_block_exchange_sender_side_inner(
+    mut stream: Stream, //TODO give a &mut stream instead so the caller can close the stream on all errors
+    own_peer_id: PeerId,
+    recv_peer_id: PeerId,
+    block_hash: String,
+    file_hash: String,
+    file_dir: PathBuf,
+) -> Result<(bool, SendId)> {
     send_peer_block_info(
         &mut stream,
         own_peer_id,
@@ -116,12 +142,17 @@ pub(crate) async fn handle_send_block_exchange_sender_side(
     .await?;
     let mut ser_answer = [0u8; 1];
     stream.read_exact(&mut ser_answer).await?;
+    let send_id = SendId {
+        peer_id: recv_peer_id,
+        file_hash: file_hash.clone(),
+        block_hash: block_hash.clone(),
+    };
     if let Some(answer) = ExchangeCode::from_repr(ser_answer[0]) {
         match answer {
             ExchangeCode::AcceptBlockSend => {}
             ExchangeCode::RejectBlockSend => {
                 stream.close().await?;
-                return Ok(false);
+                return Ok((false, send_id));
             }
             a => {
                 let err_string = format!("Unexpected ExchangeCode variant for answer {:?}", a);
@@ -148,8 +179,8 @@ pub(crate) async fn handle_send_block_exchange_sender_side(
     debug!("ser block status: {:?}", ser_block_status);
     if let Some(block_status) = ExchangeCode::from_repr(ser_block_status[0]) {
         match block_status {
-            ExchangeCode::BlockIsCorrect => Ok(true),
-            ExchangeCode::BlockIsIncorrect => Ok(false),
+            ExchangeCode::BlockIsCorrect => Ok((true, send_id)),
+            ExchangeCode::BlockIsIncorrect => Ok((false, send_id)),
             a => {
                 let err_string = format!("Unexpected ExchangeCode variant for block status{:?}", a);
                 warn!(err_string);

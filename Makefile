@@ -15,6 +15,7 @@ clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 test:
+	cargo build --release
 	nu tests/help_func/execute_all_tests.nu
 
 show:

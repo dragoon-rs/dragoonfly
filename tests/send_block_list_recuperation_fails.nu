@@ -14,15 +14,15 @@ try { rm -r $dragoonfly_root }
 
 # create the nodes
 const connection_list = [
-    [1], 
+    [1, 2], 
     [0],
+    [0]
     ]
 
 # create the network topology
-let SWARM = build_network --no-shell $connection_list
+let SWARM = build_network --no-shell $connection_list --storage_space [10, 3, 1] --unit_list [G, K, K]
 
 try {
-
     # Encode the file into blocks, put them to a directory named blocks next to the file
     print "Node 0 encodes the file into blocks"
     let encode_res = app encode-file --node $SWARM.0.ip_port $test_file
@@ -33,24 +33,23 @@ try {
     print $block_hashes
     print $"The hash of the file is: ($file_hash)"
 
-    print "\nNode 0 starts providing the file"
-    app start-provide --node $SWARM.0.ip_port $file_hash
-
-    let output_path = app get-file --node $SWARM.1.ip_port $file_hash $res_filename
-    print $"Output path for the file is ($output_path)"
+    print "\nNode 0 sends the blocks to node 1 and 2"
+    app send-block-list --node $SWARM.0.ip_port $file_hash $block_hashes
+    print "Node 0 finished sending blocks to node 1 and 2\n"
 
     print "Killing the swarm"
     swarm kill --no-shell
 
-    print "Checking the difference between the original and reconstructed file"
-    let difference = {diff $output_path $test_file} | exit_on_error | get stdout
-    if $difference != "" {
-        print "test failed, there was a difference between the files"
-        error make {msg: "Exit to catch"}
-    }
+    error make --unspanned {msg: "Send block list should have returned an error because node 1 doesn't have enough storage space to accept blocks"}
 
 } catch { |e|
     print "Killing the swarm"
     swarm kill --no-shell
-    error make --unspanned {msg: $"Test failed: ($e.msg)"}
+
+    if ($e.msg | str contains '"No more peers to send but blocks are left"') {
+        return # test successful, we got the error we expected
+    } else {
+        error make --unspanned {msg: $"Test failed: ($e.msg)"}
+    }
+
 }

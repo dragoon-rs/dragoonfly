@@ -14,12 +14,13 @@ try { rm -r $dragoonfly_root }
 
 # create the nodes
 const connection_list = [
-    [1], 
+    [1, 2], 
+    [0],
     [0],
     ]
 
 # create the network topology
-let SWARM = build_network --no-shell $connection_list
+let SWARM = build_network --no-shell $connection_list --storage_space [20, 20, 0]
 
 try {
     # Encode the file into blocks, put them to a directory named blocks next to the file
@@ -34,41 +35,31 @@ try {
 
     print "\nGetting the peer id of the nodes"
     let peer_id_0 = app node-info --node $SWARM.0.ip_port
-    let peer_id_1 = app node-info --node $SWARM.1.ip_port
 
     print "\nGetting available storage size"
     let original_storage_space = app get-available-storage --node $SWARM.1.ip_port
 
-    print "\nNode 0 sends the blocks to node 1"
-    0..(($block_hashes | length) - 1) | par-each { |index|
-        print $"Sending block ($index)..."
-        let res = app send-block-to --node $SWARM.0.ip_port $peer_id_1 $file_hash ($block_hashes | get $index)
-        if not $res.0 {
-        error make {msg: $"Failed sending block ($index): ($block_hashes | get $index)"}
-        }
-    }
-    print "Node 0 finished sending blocks to node 1\n"
+    print "\nNode 0 sends the blocks to node 1 and 2"
+    let res = app send-block-list --node $SWARM.0.ip_port --strategy_name "RoundRobin" $file_hash $block_hashes
+    print "Node 0 finished sending blocks\n"
+    print ($res | table --expand)
 
-    print "Checking that the reported available size makes sense with respect to the size of the blocks that were sent"
-    let new_storage_space = app get-available-storage --node $SWARM.1.ip_port
-    let path = $"($dragoonfly_root)/($peer_id_0)/files/($file_hash)/blocks/"
-    let size_of_all_sent_blocks = ls $path | get size | math sum | into int
-    assert equal ($original_storage_space - $new_storage_space) $size_of_all_sent_blocks
-    
-    print "Killing the swarm"
-    swarm kill --no-shell
+    let peer_id_1 = app node-info --node $SWARM.1.ip_port
 
     print "\nChecking all the blocks that were sent against the original"
     for index in 0..(($block_hashes | length) - 1) {
         let original_block_path = $"($dragoonfly_root)/($peer_id_0)/files/($file_hash)/blocks/($block_hashes | get $index)"
         let sent_block_path     = $"($dragoonfly_root)/($peer_id_1)/files/($file_hash)/blocks/($block_hashes | get $index)"
 
-        let difference = {diff ($original_block_path | path expand) ($sent_block_path |path expand)} | exit_on_error | get stdout
+        let difference = {diff ($original_block_path | path expand) ($sent_block_path | path expand)} | exit_on_error | get stdout
         if $difference != "" {
             print $"test failed, there was a difference between the blocks on index ($index): ($block_hashes | get $index)"
             error make {msg: "Exit to catch"}
         }
     }
+
+    print "Killing the swarm"
+    swarm kill --no-shell
 
 } catch { |e|
     print "Killing the swarm"

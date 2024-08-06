@@ -239,6 +239,16 @@ export def node-info [
     "node-info" | run-command $node
 }
 
+export def send-block-list [
+    file_hash: string,
+    block_list: list<string>,
+    --strategy_name: string = "RoundRobin"
+    --node: string = $DEFAULT_IP,
+] nothing -> any {
+    log debug $"Sending the list of blocks ($block_list) from file ($file_hash) using the strategy ($strategy_name)"
+    $"send-block-list/($strategy_name)/($file_hash)/($block_list | to json)" | run-command $node
+}
+
 export def send-block-to [
     peer_id_base_58: string,
     file_hash: string,

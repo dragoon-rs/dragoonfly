@@ -3,6 +3,11 @@ use ../cli/app.nu
 use ../cli/network_builder.nu *
 use std assert
 
+let dragoonfly_root = "~/.share/dragoonfly" | path expand
+
+print $"Removing ($dragoonfly_root) if it was there from a previous test\n"
+try { rm -r $dragoonfly_root }
+
 const connection_list = [
     [1],
     [0, 3],
@@ -47,7 +52,7 @@ try {
     print "Killing the swarm"
     swarm kill --no-shell
 
-    print $"(ansi light_green_reverse)    TEST SUCCESSFUL !(ansi reset)\n" 
+     
 } catch { |e|
     print "Killing the swarm"
     swarm kill --no-shell
