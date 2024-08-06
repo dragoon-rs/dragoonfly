@@ -173,7 +173,7 @@ pub(crate) enum DragoonCommand {
         sender: Sender<u64>,
     },
     NodeInfo {
-        sender: Sender<PeerId>,
+        sender: Sender<(PeerId, String)>,
     },
     RemoveEntryFromSendBlockToSet {
         peer_id: PeerId,

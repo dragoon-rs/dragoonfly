@@ -48,7 +48,7 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nGetting the peer id of the nodes"
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port
+        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
 
         print "\nGetting available storage size"
         let original_storage_space = app get-available-storage --node $SWARM.1.ip_port
@@ -58,7 +58,7 @@ def main [--ssh_addr_file: path] {
         print "Node 0 finished sending blocks\n"
         print ($res | table --expand)
 
-        let peer_id_1 = app node-info --node $SWARM.1.ip_port
+        let peer_id_1 = app node-info --node $SWARM.1.ip_port | get 0
 
         print "\nChecking all the blocks that were sent against the original"
         0..(($block_hashes | length) - 1) | par-each {|index|

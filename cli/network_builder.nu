@@ -44,13 +44,14 @@ export def build_network [
     --ssh_addr_file: path,
     --storage_space: list<int>,
     --unit_list: list<string>,
+    --label_list: list<string> = [],
     ]: nothing -> table {
     let matrix_size = $connection_list | length
 
     print $"(ansi light_green_reverse)Launching the network(ansi reset)"
     let SWARM = swarm create $matrix_size --ssh_addr_file $ssh_addr_file --storage_space $storage_space --unit_list $unit_list
     mut run_options = ""
-    let log_dir = swarm run --no-shell --no_compile=$no_compile  --replace_file_dir=$replace_file_dir $SWARM
+    let log_dir = swarm run --no-shell --no_compile=$no_compile --replace_file_dir=$replace_file_dir --label_list=$label_list $SWARM
 
     print $SWARM
 
@@ -88,7 +89,7 @@ export def build_network [
         }
 
         log debug "Making all the other nodes start to listen on their server ports"
-        #! this doesn't work with nushell 0.95
+        #! par-each doesn't work with nushell 0.95
         1..($matrix_size - 1) | each { |i|
             log debug $"Trying to listen on ($i)"
             # ssh here to launch the listen from the node itself
@@ -106,13 +107,17 @@ export def build_network [
         log info "Finished setting up the nodes for listen, starting the dials"
 
         log debug "Starting to dial the nodes"
-        0..($matrix_size - 1) | each { |i|
+        let all_node_info = 0..($matrix_size - 1) | each { |i|
+            let ip_port = $SWARM | get $i | get ip_port 
             let connect_to = ($connection_list | get $i) | filter {|x| $x > $i} | each {|x| $SWARM | get $x | get multiaddr}
             #? do commands still work when using the --node like that
-            app dial-multiple --node ($SWARM | get $i | get ip_port) $connect_to
+            app dial-multiple --node $ip_port $connect_to
+            app node-info --node $ip_port
         }
 
-        log info "Finished dialing, launching console"
+        log info "Finished dialing"
+
+        let SWARM = $SWARM | merge ($all_node_info | each {{"peer_id": $in.0, "label": $in.1}})
 
         if not $no_shell {
             ^$nu.current-exe --execute $'

@@ -59,7 +59,7 @@ def main [--ssh_addr_file: path] {
         print $block_hashes
         print $"The hash of the file is: ($file_hash)"
 
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port
+        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
 
         for i in 3..4 {
             print $"Removing blocks number ($i) from node 0: ($block_hashes | get $i)"

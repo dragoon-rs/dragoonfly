@@ -51,7 +51,7 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nGetting the peer id of the nodes"
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port
+        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
 
         print "\nNode 0 sends the blocks to node 1, 2, 3, 4"
         let distribution_list = app send-block-list --node $SWARM.0.ip_port --strategy_name "RoundRobin" $file_hash $block_hashes
@@ -62,7 +62,7 @@ def main [--ssh_addr_file: path] {
         let expected_block_distribution = [1, 2, 3, 4, 1]
 
         let peer_id_list = 0..(($connection_list | length) - 1) | each {|index|
-            {name: (app node-info --node ($SWARM | get $index | get ip_port)), index: $index}
+            {name: (app node-info --node ($SWARM | get $index | get ip_port) | get 0), index: $index}
         }
         let peer_id_list = $peer_id_list | sort-by name
 

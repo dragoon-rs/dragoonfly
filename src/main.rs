@@ -46,6 +46,8 @@ struct Cli {
     storage_unit: Units,
     #[arg(long, default_value_t = false)]
     replace_file_dir: bool,
+    #[arg(short, long)]
+    label: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, clap::ValueEnum)]
@@ -186,6 +188,7 @@ pub(crate) async fn main() -> Result<()> {
         powers_path,
         total_available_storage_for_send,
         peer_id,
+        cli.label,
         replace_file_dir,
     );
 

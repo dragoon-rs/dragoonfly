@@ -65,6 +65,7 @@ export def "swarm run" [
     --replace_file_dir,
     --features: list<string> = [], # features to include in the nodes
     --no-shell
+    --label_list: list<string> = []
 ]: nothing -> string {
     if ($swarm | is-empty) {
         error make --unspanned {
@@ -77,6 +78,21 @@ export def "swarm run" [
         }
     }
 
+    let label_list = (
+        if ($label_list | length) < ($swarm | length) {
+            if $label_list != [] {
+                log warning "The list of label is smaller than the size of the swarm, not all nodes will be named"
+            }
+            # fill the list with "" until the size matches with the swarm size
+            $label_list | append ("" | repeat (($swarm | length) - ($label_list | length)))
+        } else if ($label_list | length) > ($swarm | length) {
+            log warning "The list of label is bigger than the size of the swarm, not all labels will be used"
+            $label_list | take ($swarm | length)
+        } else {
+            $label_list
+        }
+    )
+
     let log_dir = $LOG_DIR | path join (random uuid)
 
     log info $"logging to `($log_dir)/*.log`"
@@ -86,7 +102,9 @@ export def "swarm run" [
         ^cargo build --release --features ($features | str join ",") 
     }
     
-    for node in $swarm {
+    for index in 0..<($swarm | length) {
+        let node = ($swarm | get $index)
+        let label = ($label_list | get $index)
         log info $"launching node ($node.seed) \(($node.ip_port)\)"
         let options = ( $" --ip-port ($node.ip_port)"
                 + $" --seed ($node.seed)"
@@ -95,6 +113,13 @@ export def "swarm run" [
                 + (
                     if $replace_file_dir {
                         " --replace-file-dir"
+                    } else {
+                        ""
+                    }
+                )
+                + (
+                    if $label != "" {
+                        $" --label ($label)"
                     } else {
                         ""
                     }

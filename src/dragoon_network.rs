@@ -144,6 +144,7 @@ pub(crate) struct DragoonBehaviour {
 
 pub(crate) struct DragoonNetwork {
     swarm: Swarm<DragoonBehaviour>,
+    label: String,
     command_receiver: mpsc::UnboundedReceiver<DragoonCommand>,
     command_sender: mpsc::UnboundedSender<DragoonCommand>,
     listeners: HashMap<u64, ListenerId>,
@@ -162,6 +163,7 @@ pub(crate) struct DragoonNetwork {
 }
 
 impl DragoonNetwork {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         swarm: Swarm<DragoonBehaviour>,
         command_receiver: mpsc::UnboundedReceiver<DragoonCommand>,
@@ -169,10 +171,17 @@ impl DragoonNetwork {
         powers_path: PathBuf,
         total_available_storage_for_send: usize,
         peer_id: PeerId,
+        maybe_label: Option<String>,
         replace: bool,
     ) -> Self {
+        let label = if let Some(label) = maybe_label {
+            label
+        } else {
+            peer_id.to_base58()
+        };
         Self {
             swarm,
+            label,
             command_receiver,
             command_sender,
             listeners: HashMap::new(),
@@ -853,7 +862,7 @@ where {
                 sender_send_match(sender, res, String::from("GetFileDir"));
             }
             DragoonCommand::NodeInfo { sender } => {
-                let res = Ok(*(self.swarm.local_peer_id()));
+                let res = Ok((*(self.swarm.local_peer_id()), self.label.clone()));
                 sender_send_match(sender, res, String::from("NodeInfo"));
             }
             DragoonCommand::SendBlockTo {

@@ -49,10 +49,10 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nGetting the peer id of the nodes"
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port
+        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
         
         let peer_id_table = 0..(($connection_list | length) - 1) | each { |index|
-            {(app node-info --node ($SWARM | get $index | get ip_port)) : $index}
+            {(app node-info --node ($SWARM | get $index | get ip_port) | get 0) : $index}
         } | into record | flatten
         print $peer_id_table
 
@@ -61,7 +61,7 @@ def main [--ssh_addr_file: path] {
         print "Node 0 finished sending blocks\n"
         print ($distribution_list | table --expand)
 
-        let peer_id_2 = app node-info --node $SWARM.2.ip_port
+        let peer_id_2 = app node-info --node $SWARM.2.ip_port | get 0
         mut number_of_blocks_on_node_2 = 0
         for send_id in $distribution_list {
             if $send_id.0 == $peer_id_2 {
