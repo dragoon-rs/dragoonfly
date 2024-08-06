@@ -139,6 +139,14 @@ export def start-provide [
     $"start-provide/($key)" | run-command $node
 }
 
+export def stop-provide [
+    key: string,
+    --node: string = $DEFAULT_IP
+]: nothing -> any {
+    log debug $"($node) stops providing ($key)"
+    $"stop-provide/($key)" | run-command $node
+}
+
 export def get-providers [
     key: string,
     --node: string = $DEFAULT_IP
@@ -176,7 +184,6 @@ export def decode-blocks [
 
 export def encode-file [
     file_path: string,
-    --powers_path: string = $POWERS_PATH,
     --replace-blocks = true,
     --k: int = 3,
     --n: int = 5,
@@ -185,8 +192,7 @@ export def encode-file [
 ] nothing -> any {
     log debug $"encoding the file ($file_path)"
     let file_path_enc = $file_path | slash replace
-    let powers_path_enc = ($powers_path | slash replace)
-    let list_args = [$file_path_enc, $replace_blocks, $encoding_method, $k, $n, $powers_path_enc]
+    let list_args = [$file_path_enc, $replace_blocks, $encoding_method, $k, $n]
     $"encode-file/($list_args | str join '/')" | run-command $node
 }
 
@@ -194,10 +200,14 @@ export def get-block-from [
     peer_id_base_58: string,
     file_hash: string,
     block_hash: string,
+    --no_save
     --node: string = $DEFAULT_IP
 ] nothing -> any {
     log debug $"get block ($block_hash) part of file ($file_hash) from peer ($peer_id_base_58)"
-    $"get-block-from/($peer_id_base_58)/($file_hash)/($block_hash)" | run-command $node | get block_data | bytes from_int
+    let res = $"get-block-from/($peer_id_base_58)/($file_hash)/($block_hash)/(not $no_save)" | run-command $node
+    if $no_save {
+        $res | get block_data | bytes from_int
+    }
 }
 
 def "slash replace" [] string -> string {
@@ -264,4 +274,12 @@ export def get-available-storage [
 ] nothing -> any {
     log debug $"Getting the size left available for sending blocks from ($node)"
     $"get-available-storage" | run-command $node
+}
+
+export def change-available-send-storage [
+    --node: string = $DEFAULT_IP,
+    new_storage_space: int,
+] nothing -> any {
+    log debug $"Changing the total available storage space to be ($new_storage_space)"
+    $"change-available-send-storage/($new_storage_space)" | run-command $node
 }

@@ -5,7 +5,10 @@ use futures::stream::{self as f_stream, BoxStream, FusedStream};
 use libp2p::core::ConnectedPoint;
 use tokio::fs as tfs;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use tokio::time;
 
 use libp2p::core::transport::ListenerId;
@@ -74,8 +77,9 @@ pub(crate) struct BlockRequest {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BlockResponse {
-    block_hash: String,
-    block_data: Vec<u8>,
+    pub(crate) file_hash: String,
+    pub(crate) block_hash: String,
+    pub(crate) block_data: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,7 +157,7 @@ pub(crate) struct DragoonNetwork {
     pending_start_providing: HashMap<kad::QueryId, Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, SenderMPSC<HashSet<PeerId>>>,
     pending_request_block_info: HashMap<OutboundRequestId, Sender<PeerBlockInfo>>,
-    pending_request_block: HashMap<OutboundRequestId, Sender<BlockResponse>>,
+    pending_request_block: HashMap<OutboundRequestId, (bool, Sender<Option<BlockResponse>>)>,
     //TODO add a pending_request_file using the hash as a key
 }
 
@@ -434,12 +438,49 @@ impl DragoonNetwork {
                     request_id,
                     response,
                 } => {
-                    if let Some(sender) = self.pending_request_block.remove(&request_id) {
-                        sender_send_match(
-                            sender,
-                            Ok(response),
-                            format!("message response {}", request_id),
-                        );
+                    if let Some((save_to_disk, sender)) =
+                        self.pending_request_block.remove(&request_id)
+                    {
+                        if save_to_disk {
+                            let BlockResponse {
+                                file_hash,
+                                block_hash,
+                                block_data,
+                            } = response;
+                            let save_path = get_block_dir(&self.file_dir, file_hash);
+                            let res = match tfs::create_dir_all(&save_path).await {
+                                Ok(_) => {
+                                    let file_path: PathBuf =
+                                        [save_path, PathBuf::from(block_hash)].iter().collect();
+                                    match tfs::write(&file_path, block_data).await {
+                                        Ok(_) => Ok(None),
+                                        Err(e) => {
+                                            let err_msg = format!(
+                                                "Could not write the data to {:?}: {}",
+                                                file_path, e
+                                            );
+                                            error!(err_msg);
+                                            Err(format_err!(err_msg))
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("{}", e);
+                                    Err(format_err!(e))
+                                }
+                            };
+                            sender_send_match(
+                                sender,
+                                res,
+                                format!("message response {}", request_id),
+                            );
+                        } else {
+                            sender_send_match(
+                                sender,
+                                Ok(Some(response)),
+                                format!("message response {}", request_id),
+                            )
+                        }
                     } else {
                         error!(
                             "Could no find the sender associated with {} for the message response",
@@ -533,6 +574,7 @@ where {
             .send_response(
                 channel,
                 BlockResponse {
+                    file_hash: file_hash.clone(),
                     block_hash: block_hash.clone(),
                     block_data: ser_block,
                 },
@@ -621,11 +663,11 @@ where {
             DragoonCommand::GetFile {
                 file_hash,
                 output_filename,
-                powers_path,
                 sender,
             } => {
                 info!("Starting to get the file {}", file_hash);
                 let cmd_sender = self.command_sender.clone();
+                let powers_path = self.powers_path.clone();
                 tokio::spawn(async move {
                     let res = Self::get_file::<F, G, P>(
                         cmd_sender,
@@ -719,6 +761,14 @@ where {
                     sender_send_match(sender, Err(format_err!(err)), String::from("StartProvide"));
                 }
             }
+            DragoonCommand::StopProvide { key, sender } => {
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .stop_providing(&key.clone().into_bytes().into());
+                //? need to remove from pending_start_providing ? how ? we don't have the queryID
+                sender_send_match(sender, Ok(()), "StopProvide".to_string())
+            }
             DragoonCommand::GetProviders { key, sender } => {
                 let mut provider_stream = self.get_providers(key);
                 tokio::spawn(async move {
@@ -738,6 +788,7 @@ where {
                 peer_id,
                 file_hash,
                 block_hash,
+                save_to_disk,
                 sender,
             } => {
                 let request_id = self.swarm.behaviour_mut().request_block.send_request(
@@ -747,7 +798,8 @@ where {
                         block_hash,
                     },
                 );
-                self.pending_request_block.insert(request_id, sender);
+                self.pending_request_block
+                    .insert(request_id, (save_to_disk, sender));
             }
             DragoonCommand::GetBlocksInfoFrom {
                 peer_id,
@@ -778,7 +830,6 @@ where {
                 encoding_method,
                 encode_mat_k,
                 encode_mat_n,
-                powers_path,
                 sender,
             } => {
                 let res = Self::encode_file::<F, G, P>(
@@ -788,7 +839,7 @@ where {
                     encoding_method,
                     encode_mat_k,
                     encode_mat_n,
-                    powers_path,
+                    self.powers_path.clone(),
                 )
                 .await;
                 sender_send_match(sender, res, String::from("EncodeFile"));
@@ -910,6 +961,31 @@ where {
                     Ok(available_storage),
                     String::from("GetAvailableStorage"),
                 );
+            }
+            DragoonCommand::ChangeAvailableSendStorage {
+                new_storage_size,
+                sender,
+            } => {
+                let already_used_size = self
+                    .current_total_size_of_blocks_on_disk
+                    .load(Ordering::Relaxed);
+                let result_answer = if already_used_size >= new_storage_size {
+                    self.current_available_storage_for_send
+                        .store(0, Ordering::Relaxed);
+                    format!("New storage size is {} but already used size is {}, no more blocks will be accepted via send request", new_storage_size, already_used_size)
+                } else {
+                    let remaining_size = new_storage_size - already_used_size;
+                    self.current_available_storage_for_send
+                        .store(remaining_size, Ordering::Relaxed);
+                    // we could have a race condition where the already_used_size changed in the meantime
+                    // but since there are no await probably no problem there
+                    format!("New total storage space is {}, {} is already used so the remaining available size for send blocks is {}", new_storage_size, already_used_size, remaining_size)
+                };
+                sender_send_match(
+                    sender,
+                    Ok(result_answer),
+                    String::from("ChangeAvailableSendStorage"),
+                )
             }
         }
     }
@@ -1038,12 +1114,17 @@ where {
         let file_dir = get_file_dir_recv.await??;
         debug!("Will write the file in {:?}", file_dir);
 
-        let (info_sender, mut info_receiver) = mpsc::unbounded_channel();
+        let (info_sender, info_receiver) = mpsc::unbounded_channel();
 
         debug!(
             "Requesting the information about list of blocks for file {} from peers {:?}",
             file_hash, provider_list
         );
+
+        if provider_list.is_empty() {
+            return Err(format_err!("The provider list for the file {} is empty; \nTip: did the nodes with blocks of the file use `start-provide` ?", file_hash));
+        }
+
         for peer_id in provider_list {
             let err_msg = format!("Could not send the command to request the list of blocks from peer {} for the get_file request for {}", peer_id, file_hash);
             if cmd_sender
@@ -1058,68 +1139,132 @@ where {
             };
         }
         debug!("Finished requesting block info list for file {}", file_hash);
+        drop(info_sender);
 
         //TODO change this to keep in memory other providers of the same block in case the first one fails (a hash map maybe ?)
-        let mut already_request_block = vec![];
+
         let mut block_hashes_on_disk = vec![];
-        let powers = get_powers(powers_path).await?;
-        let mut number_of_blocks_written: u32 = 0;
 
-        let (block_sender, mut block_receiver) = mpsc::unbounded_channel();
+        async fn download_first_k_blocks<F, G, P>(
+            mut info_receiver: UnboundedReceiver<Result<PeerBlockInfo>>,
+            powers_path: PathBuf,
+            block_hashes_on_disk: &mut Vec<String>,
+            cmd_sender: UnboundedSender<DragoonCommand>,
+            file_hash: String,
+            block_dir: PathBuf,
+        ) -> Result<()>
+        where
+            F: PrimeField,
+            G: CurveGroup<ScalarField = F>,
+            P: DenseUVPolynomial<F>,
+            for<'a, 'b> &'a P: Div<&'b P, Output = P>,
+        {
+            let mut already_request_block = vec![];
+            let powers = get_powers(powers_path).await?;
+            let mut number_of_blocks_written: u32 = 0;
 
-        'download_first_k_blocks: loop {
-            tokio::select! {
-                    Some(response) = info_receiver.recv() => {
+            let (block_sender, mut block_receiver) = mpsc::unbounded_channel();
 
-                            //TODO handle errors to keep going even if some peer fail
-                            let response = response.map_err(|e| -> anyhow::Error {
-                                format_err!("Could not retrieve peer block block info: {}", e)
-                            })?;
-                            let PeerBlockInfo { peer_id_base_58, file_hash, block_hashes, .. } = response;
-                            debug!("Got block list from {} for file {} : {:?}", peer_id_base_58, file_hash, block_hashes);
-                            let blocks_to_request: Vec<String> = block_hashes
-                                    .into_iter()
-                                    .filter(|x| !already_request_block.contains(x)) // do not request the block if it's already requested
-                                    .collect();
-                            debug!("Requesting the following blocks from {} for file {} : {:?}", peer_id_base_58, file_hash, blocks_to_request);
-                            let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
-                            let peer_id = PeerId::from_bytes(&bytes).unwrap();
-                            for block_hash in blocks_to_request {
-                                let err_msg = format!("Could not send the command to get the block {} from peer {} for file {}", block_hash, peer_id, file_hash);
-                                if cmd_sender.send(DragoonCommand::GetBlockFrom {peer_id, file_hash: file_hash.clone(), block_hash: block_hash.clone(), sender: Sender::SenderMPSC(block_sender.clone())}).is_err() {
-                                    error!(err_msg);
+            'download_first_k_blocks: loop {
+                tokio::select! {
+                        biased;
+                        Some(response) = info_receiver.recv() => {
+
+                                //TODO handle errors to keep going even if some peer fail
+                                let response = response.map_err(|e| -> anyhow::Error {
+                                    format_err!("Could not retrieve peer block block info: {}", e)
+                                })?;
+                                let PeerBlockInfo { peer_id_base_58, file_hash, block_hashes, .. } = response;
+                                debug!("Got block list from {} for file {} : {:?}", peer_id_base_58, file_hash, block_hashes);
+                                let blocks_to_request: Vec<String> = block_hashes
+                                        .into_iter()
+                                        .filter(|x| !already_request_block.contains(x)) // do not request the block if it's already requested
+                                        .collect();
+                                debug!("Requesting the following blocks from {} for file {} : {:?}", peer_id_base_58, file_hash, blocks_to_request);
+                                let bytes = bs58::decode(peer_id_base_58).into_vec().unwrap();
+                                let peer_id = PeerId::from_bytes(&bytes).unwrap();
+                                for block_hash in blocks_to_request {
+                                    let err_msg = format!("Could not send the command to get the block {} from peer {} for file {}", block_hash, peer_id, file_hash);
+                                    if cmd_sender.send(DragoonCommand::GetBlockFrom {peer_id, file_hash: file_hash.clone(), block_hash: block_hash.clone(), save_to_disk: false, sender: Sender::SenderMPSC(block_sender.clone())}).is_err() {
+                                        error!(err_msg);
+                                    }
+                                    else {
+                                        already_request_block.push(block_hash);
+                                    }
+
+                                }
+                        },
+                        Some(response) = block_receiver.recv() => {
+                            //TODO change this unwrap
+                            let maybe_block_response = response.unwrap();
+                            if let Some(block_response) = maybe_block_response {
+                                let block: Block<F,G> = match Block::deserialize_with_mode(&block_response.block_data[..], Compress::Yes, Validate::Yes) {
+                                    Ok(block) => block,
+                                    Err(e) => {error!("Could not deserialize a block in get-file, got error: {}", e);
+                                continue 'download_first_k_blocks}
+                                };
+                                debug!("Got a block for the file {} : {} ", file_hash, block_response.block_hash);
+                                let number_of_blocks_to_reconstruct_file = block.shard.k;
+                                debug!("Number of blocks to reconstruct file {} : {}", file_hash, number_of_blocks_to_reconstruct_file);
+                                if verify::<F,G,P>(&block, &powers)? {
+                                    //TODO check if the new block is not linearly dependant with the other blocks already on disk
+                                    debug!("Block {} for file {} was verified successfully; Now dumping to disk", block_response.block_hash, file_hash);
+                                    let _ = fs::dump(&block, &block_dir, None, Compress::Yes)?;
+                                    number_of_blocks_written += 1;
+                                    block_hashes_on_disk.push(block_response.block_hash);
+                                    if number_of_blocks_written >= number_of_blocks_to_reconstruct_file {
+                                        debug!("Received exactly {} blocks, pausing block download and trying to reconstruct the file {}", number_of_blocks_to_reconstruct_file, file_hash);
+                                        //TODO properly stop downloads ? drop/close receiver ?
+                                        break 'download_first_k_blocks;
+                                    }
                                 }
                                 else {
-                                    already_request_block.push(block_hash);
+                                    //TODO ask the block again ? change provider ?
+                                    todo!()
                                 }
+                            }
+                            else {
+                                error!("No block response was sent when using get file, the app might have saved it to disk")
+                            }
 
-                            }
-                    },
-                    Some(block_response) = block_receiver.recv() => {
-                        //TODO change this unwrap
-                        let block_response = block_response.unwrap();
-                        let block: Block<F,G> = Block::deserialize_with_mode(&block_response.block_data[..], Compress::Yes, Validate::Yes)?;
-                        debug!("Got a block for the file {} : {} ", file_hash, block_response.block_hash);
-                        let number_of_blocks_to_reconstruct_file = block.shard.k;
-                        debug!("Number of blocks to reconstruct file {} : {}", file_hash, number_of_blocks_to_reconstruct_file);
-                        if verify::<F,G,P>(&block, &powers)? {
-                            //TODO check if the new block is not linearly dependant with the other blocks already on disk
-                            debug!("Block {} for file {} was verified successfully; Now dumping to disk", block_response.block_hash, file_hash);
-                            let _ = fs::dump(&block, &block_dir, None, Compress::Yes)?;
-                            number_of_blocks_written += 1;
-                            block_hashes_on_disk.push(block_response.block_hash);
-                            if number_of_blocks_written >= number_of_blocks_to_reconstruct_file {
-                                debug!("Received exactly {} blocks, pausing block download and trying to reconstruct the file {}", number_of_blocks_to_reconstruct_file, file_hash);
-                                //TODO properly stop downloads ? drop/close receiver ?
-                                break 'download_first_k_blocks;
-                            }
                         }
-                        else {
-                            //TODO ask the block again ? change provider ?
-                            todo!()
-                        }
+
+                }
+            }
+            Ok(())
+        }
+
+        let timeout_duration = Duration::from_secs(10);
+
+        match time::timeout(
+            timeout_duration,
+            download_first_k_blocks::<F, G, P>(
+                info_receiver,
+                powers_path,
+                &mut block_hashes_on_disk,
+                cmd_sender,
+                file_hash,
+                block_dir.clone(),
+            ),
+        )
+        .await
+        {
+            Ok(res) => {
+                match res {
+                    Ok(_) => {} //nothing to do
+                    Err(e) => {
+                        error!("{}", e);
+                        return Err(format_err!(
+                            "Getting the required amount of blocks failed due to the following: {}",
+                            e
+                        ));
                     }
-
+                }
+            }
+            Err(_) => {
+                let err_msg = "Getting the required amount of blocks to make the file timed-out, not enough blocks to make the file";
+                error!(err_msg);
+                return Err(format_err!(err_msg));
             }
         }
 

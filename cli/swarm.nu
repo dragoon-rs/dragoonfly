@@ -8,6 +8,7 @@ const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
 # create a swarm table
 export def "swarm create" [
     n: int,
+    --ssh_addr_file: path,
     --storage_space: list<int>,
     --unit_list: list<string>,
     ]: nothing -> table {
@@ -26,6 +27,7 @@ export def "swarm create" [
         }
         
     }
+
     let storage_space = match $storage_space {
         null => (20 | repeat $n),
         _ => $storage_space,
@@ -34,11 +36,23 @@ export def "swarm create" [
         null => ("G" | repeat $n),
         _ => $unit_list,
     }
+
+    let addr_list = match $ssh_addr_file {
+        null => ({user: "local", ip: "127.0.0.1"} | repeat $n),
+        _ => {cat $ssh_addr_file | lines | skip 1 | take $n | parse "{user},{ip}"},
+    }
+
+    if ($addr_list | length) != $n {
+        error make {
+            msg: $"Tried to create a network with ($n) nodes but the list of addr only had ($addr_list | length) entries: ($addr_list)"
+        }
+    }
     
     seq 0 ($n - 1) | each { |index| {
-        ip_port: $"127.0.0.1:(3_000 + $index)",
+        user: ($addr_list | get $index | get user),
+        ip_port: $"($addr_list | get $index | get ip):(3_000 + $index)",
         seed: $index,
-        multiaddr: $"/ip4/127.0.0.1/tcp/(31_200 + $index)",
+        multiaddr: $"/ip4/($addr_list | get $index | get ip)/tcp/(31_200 + $index)",
         storage: ($storage_space | get $index)
         unit: ($unit_list | get $index)
     } }
@@ -46,7 +60,9 @@ export def "swarm create" [
 
 # run a swarm
 export def "swarm run" [
-    swarm: table<ip_port: string, seed: int, multiaddr: string, storage: int>, # the table of nodes to run
+    swarm: table<user: string, ip_port: string, seed: int, multiaddr: string, storage: int>, # the table of nodes to run
+    --no_compile,
+    --replace_file_dir,
     --features: list<string> = [], # features to include in the nodes
     --no-shell
 ]: nothing -> string {
@@ -55,21 +71,65 @@ export def "swarm run" [
             msg: "`swarm create` requires a non empty swarm"
         }
     }
+    if ($swarm.0.user != "local") {
+        error make --unspanned {
+            msg: "The first node should be spawned locally"
+        }
+    }
 
     let log_dir = $LOG_DIR | path join (random uuid)
 
     log info $"logging to `($log_dir)/*.log`"
-
-    ^cargo build --release --features ($features | str join ",") 
     mkdir $log_dir
+
+    if not $no_compile {
+        ^cargo build --release --features ($features | str join ",") 
+    }
+    
     for node in $swarm {
-        # FIXME: don't use Bash here
         log info $"launching node ($node.seed) \(($node.ip_port)\)"
-        ^bash -c (
-            $"cargo run --features '($features | str join ',')' "
-          + $"-- --powers-path ($POWERS_PATH) --ip-port ($node.ip_port) --seed ($node.seed) --storage-space ($node.storage) --storage-unit ($node.unit)"
-          + $" 1> ($log_dir)/($node.seed).log 2> /dev/null &"
-        )
+        let options = ( $" --ip-port ($node.ip_port)"
+                + $" --seed ($node.seed)"
+                + $" --storage-space ($node.storage)"
+                + $" --storage-unit ($node.unit)"
+                + (
+                    if $replace_file_dir {
+                        " --replace-file-dir"
+                    } else {
+                        ""
+                    }
+                )
+                )
+
+        let redirect = $"1> ($log_dir)/($node.seed).log 2> /dev/null &"
+
+        if ($node.user == "local") {
+            if not $no_compile {
+                # FIXME: don't use Bash here
+                ^bash -c (
+                    $"cargo run --features '($features | str join ',')' -- --powers-path ($POWERS_PATH) ($options) ($redirect)"
+                )
+            } else {
+                ^bash -c (
+                    $"target/release/dragoonfly --powers-path ($POWERS_PATH) ($options) ($redirect)"
+                )
+            }
+                
+        } else {
+            let ip = ($node.ip_port | parse "{ip}:{port}" | into record | get ip)
+            let remote = $"($node.user)@($ip)"
+            let target_path = "/tmp/target/release"
+            let pre_cmd = $"mkdir -p ($target_path) && rsync"
+            # copy the executable and the powers file to the remote
+            # using rsync to not copy the file if it already exists
+            ^rsync -a --rsync-path $pre_cmd target/release/dragoonfly $POWERS_PATH $"($remote):($target_path)"
+            # launch node on the remote
+            ^bash -c (
+                $"ssh ($remote) '($target_path)/dragoonfly --powers-path ($target_path)/($POWERS_PATH | path basename ) ($options)' ($redirect)"
+            )
+            
+        }
+        
     }
 
     if not $no_shell {
@@ -125,10 +185,20 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
 }
 
 # kill the swarm
-export def "swarm kill" [--no-shell]: nothing -> nothing {
+export def "swarm kill" [
+    swarm: table<user: string, ip_port: string, seed: int, multiaddr: string, storage: int>
+    --no-shell
+    ]: nothing -> nothing {
+    # kills all local node process
     ps | where name =~ $NAME | each {|it|
         log warning $"killing ($it.pid)"
         kill $it.pid
+    }
+    # kills all remote node process
+    $swarm | filter {|node| $node.user != "local"} | each {|node|
+        let ip = ($node.ip_port | parse "{ip}:{port}" | into record | get ip)
+        let remote = $"($node.user)@($ip)"
+        ^ssh $remote "ps -ef | grep 'dragoonfly' | grep -v grep | grep -v nu | awk '{print $2}' | xargs -r kill -15"
     }
     if not $no_shell {
         exit

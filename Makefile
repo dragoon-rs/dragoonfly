@@ -1,4 +1,6 @@
-.PHONY: fmt fmt-check check clippy test show show-proxy unset-proxy
+.PHONY: fmt fmt-check check clippy test show show-proxy unset-proxy toto
+
+ssh_addr_file = 0
 
 DEFAULT_GOAL: fmt-check check clippy test
 
@@ -16,7 +18,11 @@ clippy:
 
 test:
 	cargo build --release
-	nu tests/help_func/execute_all_tests.nu
+ifeq ($(ssh_addr_file),0)
+	nu help_func/execute_all_tests.nu
+else
+	nu help_func/execute_all_tests.nu --ssh_addr_file $(ssh_addr_file)
+endif
 
 show:
 	rustup --version

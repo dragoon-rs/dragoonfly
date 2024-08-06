@@ -39,15 +39,18 @@ use std log
 export def build_network [
     connection_list: list<list<int>>, 
     --no-shell,
+    --no_compile,
+    --replace_file_dir,
+    --ssh_addr_file: path,
     --storage_space: list<int>,
     --unit_list: list<string>,
     ]: nothing -> table {
-    # checking the matrix is correctly built
     let matrix_size = $connection_list | length
 
     print $"(ansi light_green_reverse)Launching the network(ansi reset)"
-    let SWARM = swarm create $matrix_size --storage_space $storage_space --unit_list $unit_list
-    let log_dir = swarm run --no-shell $SWARM
+    let SWARM = swarm create $matrix_size --ssh_addr_file $ssh_addr_file --storage_space $storage_space --unit_list $unit_list
+    mut run_options = ""
+    let log_dir = swarm run --no-shell --no_compile=$no_compile  --replace_file_dir=$replace_file_dir $SWARM
 
     print $SWARM
 
@@ -86,22 +89,26 @@ export def build_network [
 
         log debug "Making all the other nodes start to listen on their server ports"
         #! this doesn't work with nushell 0.95
-        1..($matrix_size - 1) | par-each { |i|
+        1..($matrix_size - 1) | each { |i|
             log debug $"Trying to listen on ($i)"
-            app listen --node ($SWARM. | get $i | get ip_port) ($SWARM |get $i | get multiaddr)
+            # ssh here to launch the listen from the node itself
+            if (($SWARM | get $i | get user) == "local") {
+                app listen --node ($SWARM | get $i | get ip_port) ($SWARM | get $i | get multiaddr)
+            } else {
+                let node = ($SWARM | get $i)
+                let ip = ($node | get ip_port | parse "{ip}:{port}" | into record | get ip)
+                let remote = $"($node | get user)@($ip)"
+                let _ = (^ssh $remote $"curl "http://($node | get ip_port)/listen/($node | get multiaddr | str replace --all '/' '%2F')"" | complete)
+            }
+            
             log debug $"Successful listen on ($i)"
         }
         log info "Finished setting up the nodes for listen, starting the dials"
 
         log debug "Starting to dial the nodes"
-        # for i in 0..($matrix_size - 1) {
-        #     let connect_to = ($connection_list | get $i) | filter {|x| $x > $i} | each {|x| $SWARM | get $x | get multiaddr}
-        #     app dial-multiple --node ($SWARM | get $i | get ip_port) $connect_to
-        #     print -n $"($i + 1)/($matrix_size)\r"
-        # }
-
-        0..($matrix_size - 1) | par-each { |i|
+        0..($matrix_size - 1) | each { |i|
             let connect_to = ($connection_list | get $i) | filter {|x| $x > $i} | each {|x| $SWARM | get $x | get multiaddr}
+            #? do commands still work when using the --node like that
             app dial-multiple --node ($SWARM | get $i | get ip_port) $connect_to
         }
 
@@ -121,7 +128,7 @@ export def build_network [
         }
     } catch { |e|
         log info "Killing the swarm"
-        swarm kill --no-shell
+        swarm kill --no-shell $SWARM
         error make --unspanned {msg: $"Builder failed: ($e.msg)"}
     }
 }

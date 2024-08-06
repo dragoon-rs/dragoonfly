@@ -85,6 +85,19 @@ impl ConvertSer for Option<PeerId> {
     }
 }
 
+impl ConvertSer for Option<BlockResponse> {
+    fn convert_ser(&self) -> impl Serialize {
+        match self {
+            Some(block_response) => block_response.clone(),
+            None => BlockResponse {
+                file_hash: "None".to_string(),
+                block_hash: "None".to_string(),
+                block_data: vec![],
+            },
+        }
+    }
+}
+
 impl ConvertSer for SendId {
     fn convert_ser(&self) -> impl Serialize {
         let SendId {

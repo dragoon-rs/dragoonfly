@@ -42,8 +42,10 @@ struct Cli {
     seed: u8,
     #[arg(long, default_value_t = 20)]
     storage_space: usize,
-    #[arg(long, default_value_t = Units::G, help = "Known units are B, K, M, G, T")]
+    #[arg(long, default_value_t = Units::G, help = "Standard power of 10 notation")]
     storage_unit: Units,
+    #[arg(long, default_value_t = false)]
+    replace_file_dir: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, clap::ValueEnum)]
@@ -58,13 +60,7 @@ enum Units {
 
 impl std::fmt::Display for Units {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Units::B => write!(f, "B"),
-            Units::K => write!(f, "K"),
-            Units::M => write!(f, "M"),
-            Units::G => write!(f, "G"),
-            Units::T => write!(f, "T"),
-        }
+        std::fmt::Debug::fmt(self, f)
     }
 }
 
@@ -91,12 +87,16 @@ pub(crate) async fn main() -> Result<()> {
             get(commands::create_cmd_get_connected_peers),
         )
         .route("/dial-single/:addr", get(commands::create_cmd_dial_single))
-        .route("/dial-multiple/:list_addr", get(commands::create_cmd_dial_multiple))
+        .route(
+            "/dial-multiple/:list_addr",
+            get(commands::create_cmd_dial_multiple),
+        )
         .route("/add-peer/:addr", get(commands::create_cmd_add_peer))
         .route(
             "/start-provide/:key",
             get(commands::create_cmd_start_provide),
         )
+        .route("/stop-provide/:key", get(commands::create_cmd_stop_provide))
         .route(
             "/get-providers/:key",
             get(commands::create_cmd_get_providers),
@@ -112,17 +112,42 @@ pub(crate) async fn main() -> Result<()> {
             get(commands::create_cmd_decode_blocks),
         )
         .route(
-            "/encode-file/:file_path/:replace-blocks/:encoding-method/:encode_mat_k/:encode_mat_n/:powers_path",
+            "/encode-file/:file_path/:replace-blocks/:encoding-method/:encode_mat_k/:encode_mat_n",
             get(commands::create_cmd_encode_file),
         )
-        .route("/get-block-from/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_get_block_from))
-        .route("/get-file/:file_hash/:output_filename/:powers_path", get(commands::create_cmd_get_file))
-        .route("/get-block-list/:file_hash", get(commands::create_cmd_get_block_list))
-        .route("/get-blocks-info-from/:peer_id_base_58/:file_hash", get(commands::create_cmd_get_blocks_info_from))
+        .route(
+            "/get-block-from/:peer_id_base_58/:file_hash/:block_hash/:save_to_disk",
+            get(commands::create_cmd_get_block_from),
+        )
+        .route(
+            "/get-file/:file_hash/:output_filename/:powers_path",
+            get(commands::create_cmd_get_file),
+        )
+        .route(
+            "/get-block-list/:file_hash",
+            get(commands::create_cmd_get_block_list),
+        )
+        .route(
+            "/get-blocks-info-from/:peer_id_base_58/:file_hash",
+            get(commands::create_cmd_get_blocks_info_from),
+        )
         .route("/node-info", get(commands::create_cmd_node_info))
-        .route("/send-block-to/:peer_id_base_58/:file_hash/:block_hash", get(commands::create_cmd_send_block_to))
-        .route("/get-available-storage", get(commands::create_cmd_get_available_storage))
-        .route("/send-block-list/:strategy_name/:file_hash/:block_list", get(commands::create_cmd_send_block_list));
+        .route(
+            "/send-block-to/:peer_id_base_58/:file_hash/:block_hash",
+            get(commands::create_cmd_send_block_to),
+        )
+        .route(
+            "/get-available-storage",
+            get(commands::create_cmd_get_available_storage),
+        )
+        .route(
+            "/send-block-list/:strategy_name/:file_hash/:block_list",
+            get(commands::create_cmd_send_block_list),
+        )
+        .route(
+            "/change-available-send-storage/:new_storage_size",
+            get(commands::create_cmd_change_available_send_storage),
+        );
 
     let router = router.with_state(Arc::new(app::AppState::new(cmd_sender.clone())));
 
@@ -132,6 +157,7 @@ pub(crate) async fn main() -> Result<()> {
     let powers_path = cli.powers_path;
     let ip_port: SocketAddr = cli.ip_port;
     let seed = cli.seed;
+    let replace_file_dir = cli.replace_file_dir;
 
     let multiplier = match cli.storage_unit {
         Units::B => 1,
@@ -160,7 +186,7 @@ pub(crate) async fn main() -> Result<()> {
         powers_path,
         total_available_storage_for_send,
         peer_id,
-        false,
+        replace_file_dir,
     );
 
     info!("Running the network");
