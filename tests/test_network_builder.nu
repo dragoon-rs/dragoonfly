@@ -1,9 +1,9 @@
 use ../cli/swarm.nu *
-use ../cli/app.nu
+use ../cli/dragoon.nu
 use ../cli/network_builder.nu *
 use std assert
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
 
     let dragoonfly_root = "~/.share/dragoonfly" | path expand
 
@@ -20,14 +20,14 @@ def main [--ssh_addr_file: path] {
         [4],
         ]
 
-    let SWARM = build_network --no-shell --replace_file_dir $connection_list --ssh_addr_file=$ssh_addr_file
+    let SWARM = build_network --no-shell --replace-file-dir $connection_list --ssh-addr-file=$ssh_addr_file
     try {
         let node_number = $SWARM | length
         assert equal $node_number ($connection_list | length)
-        mut name_list: table = [{(app node-info --node ($SWARM.0.ip_port) | get 0): 0 }]
+        mut name_list: table = [{(dragoon node-info --node ($SWARM.0.ip_port) | get 0): 0 }]
         
         for i in 1..($node_number - 1) {
-            $name_list = ($name_list | merge [{(app node-info --node ($SWARM | get $i | get ip_port) | get 0): $i }])
+            $name_list = ($name_list | merge [{(dragoon node-info --node ($SWARM | get $i | get ip_port) | get 0): $i }])
         }
         print "Names of the nodes are:"
         print $name_list
@@ -35,7 +35,7 @@ def main [--ssh_addr_file: path] {
         mut actual_connection_list: list<list<int>> = []
 
         for i in 0..($node_number - 1) {
-            let node_peers = app get-connected-peers --node ($SWARM | get $i | get ip_port)
+            let node_peers = dragoon get-connected-peers --node ($SWARM | get $i | get ip_port)
             mut corresponding_node_number = []
             for peer_id in $node_peers {
                 let number = ($name_list | get $peer_id | get 0)

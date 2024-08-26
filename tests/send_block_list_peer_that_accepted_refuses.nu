@@ -1,12 +1,12 @@
 use ../cli/swarm.nu *
-use ../cli/app.nu
+use ../cli/dragoon.nu
 use ../cli/network_builder.nu *
 use std assert
 use ../help_func/exit_func.nu exit_on_error
 use ../help_func/get_remote.nu get_ssh_remote
 
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
 
     # define variables
     let remote_output_path = "/tmp/dragoon_test"
@@ -25,7 +25,7 @@ def main [--ssh_addr_file: path] {
         ]
 
     # create the network topology
-    let SWARM = build_network --no-shell --replace_file_dir $connection_list --ssh_addr_file=$ssh_addr_file --storage_space [20, 20, 1] --unit_list [G, G, K]
+    let SWARM = build_network --no-shell --replace-file-dir $connection_list --ssh-addr-file=$ssh_addr_file --storage-space [20, 20, 1] --unit-list [G, G, K]
 
     # remove previous output directory to ensure a fresh environment test
     for index in 0..(($SWARM | length) - 1) {
@@ -40,7 +40,7 @@ def main [--ssh_addr_file: path] {
     try {
         # Encode the file into blocks, put them to a directory named blocks next to the file
         print "Node 0 encodes the file into blocks"
-        let encode_res = app encode-file --node $SWARM.0.ip_port $test_file
+        let encode_res = dragoon encode-file --node $SWARM.0.ip_port $test_file
         let block_hashes = $encode_res.1 | from json  #! This is a string not a list, need to convert
         let file_hash = $encode_res.0
 
@@ -49,19 +49,19 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nGetting the peer id of the nodes"
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
+        let peer_id_0 = dragoon node-info --node $SWARM.0.ip_port | get 0
         
         let peer_id_table = 0..(($connection_list | length) - 1) | each { |index|
-            {(app node-info --node ($SWARM | get $index | get ip_port) | get 0) : $index}
+            {(dragoon node-info --node ($SWARM | get $index | get ip_port) | get 0) : $index}
         } | into record | flatten
         print $peer_id_table
 
         print "\nNode 0 sends the blocks to node 1 and 2"
-        let distribution_list = app send-block-list --node $SWARM.0.ip_port --strategy_name "RoundRobin" $file_hash $block_hashes
+        let distribution_list = dragoon send-block-list --node $SWARM.0.ip_port --strategy-name "RoundRobin" $file_hash $block_hashes
         print "Node 0 finished sending blocks\n"
         print ($distribution_list | table --expand)
 
-        let peer_id_2 = app node-info --node $SWARM.2.ip_port | get 0
+        let peer_id_2 = dragoon node-info --node $SWARM.2.ip_port | get 0
         mut number_of_blocks_on_node_2 = 0
         for send_id in $distribution_list {
             if $send_id.0 == $peer_id_2 {

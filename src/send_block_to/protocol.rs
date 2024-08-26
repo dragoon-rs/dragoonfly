@@ -25,7 +25,7 @@ use komodo::zk::Powers;
 
 use crate::send_strategy::SendId;
 use crate::{
-    dragoon_network::{get_block_dir, get_powers},
+    dragoon_swarm::{get_block_dir, get_powers},
     peer_block_info::PeerBlockInfo,
 };
 

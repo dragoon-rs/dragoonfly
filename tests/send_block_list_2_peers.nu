@@ -1,11 +1,11 @@
 use ../cli/swarm.nu *
-use ../cli/app.nu
+use ../cli/dragoon.nu
 use ../cli/network_builder.nu *
 use std assert
 use ../help_func/exit_func.nu exit_on_error
 use ../help_func/get_remote.nu get_ssh_remote
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
 
     # define variables
     let remote_output_path = "/tmp/dragoon_test"
@@ -23,7 +23,7 @@ def main [--ssh_addr_file: path] {
         ]
 
     # create the network topology
-    let SWARM = build_network --no-shell --replace_file_dir $connection_list --ssh_addr_file=$ssh_addr_file
+    let SWARM = build_network --no-shell --replace-file-dir $connection_list --ssh-addr-file=$ssh_addr_file
 
     # remove previous output directory to ensure a fresh environment test
     for index in 0..(($SWARM | length) - 1) {
@@ -38,7 +38,7 @@ def main [--ssh_addr_file: path] {
     try {
         # Encode the file into blocks, put them to a directory named blocks next to the file
         print "Node 0 encodes the file into blocks"
-        let encode_res = app encode-file --node $SWARM.0.ip_port $test_file
+        let encode_res = dragoon encode-file --node $SWARM.0.ip_port $test_file
         let block_hashes = $encode_res.1 | from json  #! This is a string not a list, need to convert
         let file_hash = $encode_res.0
 
@@ -47,19 +47,19 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nGetting the peer id of the nodes"
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
-        let peer_id_1 = app node-info --node $SWARM.1.ip_port | get 0
+        let peer_id_0 = dragoon node-info --node $SWARM.0.ip_port | get 0
+        let peer_id_1 = dragoon node-info --node $SWARM.1.ip_port | get 0
 
         print "\nGetting available storage size"
-        let original_storage_space = app get-available-storage --node $SWARM.1.ip_port
+        let original_storage_space = dragoon get-available-send-storage --node $SWARM.1.ip_port
 
         print "\nNode 0 sends the blocks to node 1"
-        app send-block-list --node $SWARM.0.ip_port $file_hash $block_hashes
+        dragoon send-block-list --node $SWARM.0.ip_port $file_hash $block_hashes
         print "Node 0 finished sending blocks to node 1\n"
 
         print "Checking that the reported available size makes sense with respect to the size of the blocks that were sent"
         
-        let new_storage_space = app get-available-storage --node $SWARM.1.ip_port
+        let new_storage_space = dragoon get-available-send-storage --node $SWARM.1.ip_port
         let path = $"($dragoonfly_root)/($peer_id_0)/files/($file_hash)/blocks/"
         print $path
         let size_of_all_sent_blocks = ls $path | get size | math sum | into int

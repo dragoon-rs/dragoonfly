@@ -1227,7 +1227,7 @@ where {
                                 }
                             }
                             else {
-                                error!("No block response was sent when using get file, the app might have saved it to disk")
+                                error!("No block response was sent when using get file, the node might have saved it to disk")
                             }
 
                         }

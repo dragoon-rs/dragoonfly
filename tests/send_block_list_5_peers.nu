@@ -1,12 +1,12 @@
 use ../cli/swarm.nu *
-use ../cli/app.nu
+use ../cli/dragoon.nu
 use ../cli/network_builder.nu *
 use std assert
 use ../help_func/exit_func.nu exit_on_error
 use ../help_func/get_remote.nu get_ssh_remote
 
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
 
     # define variables
     let remote_output_path = "/tmp/dragoon_test"
@@ -27,7 +27,7 @@ def main [--ssh_addr_file: path] {
         ]
 
     # create the network topology
-    let SWARM = build_network --no-shell --replace_file_dir $connection_list --ssh_addr_file=$ssh_addr_file
+    let SWARM = build_network --no-shell --replace-file-dir $connection_list --ssh-addr-file=$ssh_addr_file
 
     # remove previous output directory to ensure a fresh environment test
     for index in 0..(($SWARM | length) - 1) {
@@ -42,7 +42,7 @@ def main [--ssh_addr_file: path] {
     try {
         # Encode the file into blocks, put them to a directory named blocks next to the file
         print "Node 0 encodes the file into blocks"
-        let encode_res = app encode-file --node $SWARM.0.ip_port $test_file
+        let encode_res = dragoon encode-file --node $SWARM.0.ip_port $test_file
         let block_hashes = $encode_res.1 | from json  #! This is a string not a list, need to convert
         let file_hash = $encode_res.0
 
@@ -51,10 +51,10 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nGetting the peer id of the nodes"
-        let peer_id_0 = app node-info --node $SWARM.0.ip_port | get 0
+        let peer_id_0 = dragoon node-info --node $SWARM.0.ip_port | get 0
 
         print "\nNode 0 sends the blocks to node 1, 2, 3, 4"
-        let distribution_list = app send-block-list --node $SWARM.0.ip_port --strategy_name "RoundRobin" $file_hash $block_hashes
+        let distribution_list = dragoon send-block-list --node $SWARM.0.ip_port --strategy-name "RoundRobin" $file_hash $block_hashes
         print "Node 0 finished sending blocks\n"
         print ($distribution_list | table --expand)
 
@@ -62,7 +62,7 @@ def main [--ssh_addr_file: path] {
         let expected_block_distribution = [1, 2, 3, 4, 1]
 
         let peer_id_list = 0..(($connection_list | length) - 1) | each {|index|
-            {name: (app node-info --node ($SWARM | get $index | get ip_port) | get 0), index: $index}
+            {name: (dragoon node-info --node ($SWARM | get $index | get ip_port) | get 0), index: $index}
         }
         let peer_id_list = $peer_id_list | sort-by name
 

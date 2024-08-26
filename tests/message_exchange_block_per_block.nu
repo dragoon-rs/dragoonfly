@@ -1,11 +1,11 @@
 use ../cli/swarm.nu *
-use ../cli/app.nu
+use ../cli/dragoon.nu
 use ../cli/network_builder.nu *
 use std assert
 use ../help_func/exit_func.nu exit_on_error
 use ../help_func/get_remote.nu get_ssh_remote
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
 
     # define variables
     let output_dir: path = "/tmp/dragoon_test/received_blocks"
@@ -23,7 +23,7 @@ def main [--ssh_addr_file: path] {
         ]
 
     # create the network topology
-    let SWARM = build_network --no-shell --replace_file_dir $connection_list --ssh_addr_file=$ssh_addr_file
+    let SWARM = build_network --no-shell --replace-file-dir $connection_list --ssh-addr-file=$ssh_addr_file
 
     try {
 
@@ -40,7 +40,7 @@ def main [--ssh_addr_file: path] {
 
         # Encode the file into blocks, put them to a directory named blocks next to the file
         print "Node 1 encodes the file into blocks"
-        let encode_res = app encode-file --node $SWARM.1.ip_port $test_file
+        let encode_res = dragoon encode-file --node $SWARM.1.ip_port $test_file
         let block_hashes = $encode_res.1 | from json  #! This is a string not a list, need to convert
         let file_hash = $encode_res.0
 
@@ -49,15 +49,15 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nNode 1 starts providing the file"
-        app start-provide --node $SWARM.1.ip_port $file_hash
+        dragoon start-provide --node $SWARM.1.ip_port $file_hash
 
         print "Node 0 starts searching for the providers with the file hash"
-        let provider = app get-providers --node $SWARM.0.ip_port $file_hash | get 0
+        let provider = dragoon get-providers --node $SWARM.0.ip_port $file_hash | get 0
         print $"The providers are:"
         print $provider
 
         print "\nNode 0 asks node 1 to provide the list of blocks it has for the file"
-        let received_block_list = app get-blocks-info-from --node $SWARM.0.ip_port $provider $file_hash | get block_hashes
+        let received_block_list = dragoon get-blocks-info-from --node $SWARM.0.ip_port $provider $file_hash | get block_hashes
         print $"The blocks node 1 has are:"
         print $received_block_list
 
@@ -73,12 +73,12 @@ def main [--ssh_addr_file: path] {
         for $i in 0..<($received_block_list | length) {
             let $hash = $received_block_list | get $i
             print $"Getting block ($hash)"
-            app get-block-from --node $SWARM.0.ip_port --no_save $provider $file_hash ($hash) | save $"($output_dir)/($hash)"
+            dragoon get-block-from --node $SWARM.0.ip_port --no-save $provider $file_hash ($hash) | save $"($output_dir)/($hash)"
         }
         print "Finished getting all the blocks\n"
         
         print "Node 0 reconstructs the file with the blocks"
-        app decode-blocks --node $SWARM.0.ip_port $output_dir $received_block_list $res_filename
+        dragoon decode-blocks --node $SWARM.0.ip_port $output_dir $received_block_list $res_filename
 
         print "Killing the swarm"
         swarm kill --no-shell $SWARM

@@ -7,10 +7,13 @@ const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
 
 # create a swarm table
 export def "swarm create" [
-    n: int,
-    --ssh_addr_file: path,
-    --storage_space: list<int>,
-    --unit_list: list<string>,
+    n: int,                         # The number of nodes to create
+    --ssh-addr-file: path,          # Add a file containing ssh addresses, first line is always skipped, in the format: username, ip
+                                    # See ssh_addr.txt for example
+                                    # If no file is provided, nodes are run on localhost, port 3000, 3001, 3002, etc.
+                                    # The file should contain at least n distinct username + ip
+    --storage-space: list<int>,     # The space for blocks received via send request, default: 20, should be a list of size n
+    --unit-list: list<string>,      # The unit in powers of 10 for the space received via send request, default: G; possible values: "", K, M, G, T, should be a list of size n
     ]: nothing -> table {
     if $storage_space != null {
         if ($storage_space | length) != $n {
@@ -61,11 +64,11 @@ export def "swarm create" [
 # run a swarm
 export def "swarm run" [
     swarm: table<user: string, ip_port: string, seed: int, multiaddr: string, storage: int>, # the table of nodes to run
-    --no_compile,
-    --replace_file_dir,
-    --features: list<string> = [], # features to include in the nodes
-    --no-shell
-    --label_list: list<string> = []
+    --no-compile, # do not compile the rust binary again
+    --replace-file-dir, # clear the file directory for each node
+    --features: list<string> = [], # features to include in the nodes, there are currently none available that are node specific, but features of imported modules can be used
+    --no-shell # do not create a subshell after running this command
+    --label-list: list<string> = [] # list of labels for node names, default is the node's peer id, should have has many values as there are nodes, no space allowed in names
 ]: nothing -> string {
     if ($swarm | is-empty) {
         error make --unspanned {
@@ -162,7 +165,7 @@ export def "swarm run" [
        $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
        $env.NU_LOG_LEVEL = "DEBUG"
        $env.SWARM_LOG_DIR = ($log_dir)
-       use cli/app.nu
+       use cli/dragoon.nu
        use cli/swarm.nu ["swarm kill", "swarm list", "swarm log", "bytes decode"]
        const SWARM = ($swarm | to nuon)
     '
@@ -211,8 +214,8 @@ export def "swarm log" []: nothing -> table<date: datetime, level: string, id: i
 
 # kill the swarm
 export def "swarm kill" [
-    swarm: table<user: string, ip_port: string, seed: int, multiaddr: string, storage: int>
-    --no-shell
+    swarm: table<user: string, ip_port: string, seed: int, multiaddr: string, storage: int> # the swarm table
+    --no-shell, # in case where swarm run was also used with --no-shell flag
     ]: nothing -> nothing {
     # kills all local node process
     ps | where name =~ $NAME | each {|it|

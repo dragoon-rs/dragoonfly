@@ -1,11 +1,13 @@
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
     if $ssh_addr_file != null {
         print "Starting tests with ssh using the followings:"
         cat $ssh_addr_file
     }
     let all_tests = (ls tests/*.nu | where type == file)
     let total_number_of_tests = $all_tests | length 
+    # Capture the errors from the tests to not stop even if one or more tests fail
+    # This mean we always run all the tests
     let error_list =  $all_tests | each { |test|
         let test_name =  ($test | get name)
         print $"\n(ansi yellow_reverse)    LAUNCHING TEST ($test_name)(ansi reset)\n"
@@ -13,8 +15,8 @@ def main [--ssh_addr_file: path] {
         (if $ssh_addr_file == null {
             nu $test_name
         } else {
-            nu $test_name --ssh_addr_file $ssh_addr_file
-        }) e>| do { |e|
+            nu $test_name --ssh-addr-file=$ssh_addr_file
+        }) e>| do { |e| # capture the possible error and check if it's empty or not
         let maybe_error = ($e | parse -r "(Error: .*)")
             if ($maybe_error | is-empty) {
                 print $"(ansi light_green_reverse)    TEST SUCCESSFUL !(ansi reset)\n"

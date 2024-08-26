@@ -60,7 +60,7 @@ def run-command [
 #
 # # Examples
 #     listen on 127.0.0.1 and TCP port 31000
-#     > app listen "/ip4/127.0.0.1/tcp/31000"
+#     > dragoon listen "/ip4/127.0.0.1/tcp/31000"
 export def listen [
     multiaddr: string, # the multi-address to listen to
     --node: string = $DEFAULT_IP
@@ -87,7 +87,7 @@ export def get-network-info [--node: string = $DEFAULT_IP]: nothing -> record<pe
 #
 # Examples
 #     remove a listener directly
-#     > app remove-listener (app listen "/ip4/127.0.0.1/tcp/31200")
+#     > dragoon remove-listener (dragoon listen "/ip4/127.0.0.1/tcp/31200")
 export def remove-listener [
     listener_id: string # the idea of the listener, namely the one given by `listen`
     --node: string = $DEFAULT_IP
@@ -134,11 +134,11 @@ export def add-peer [
 }
 
 export def start-provide [
-    key: string,
+    file_hash: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
-    log debug $"($node) starts providing ($key)"
-    $"start-provide" | run-command $node --post-body $key
+    log debug $"($node) starts providing ($file_hash)"
+    $"start-provide" | run-command $node --post-body $file_hash
 }
 
 export def stop-provide [
@@ -150,11 +150,11 @@ export def stop-provide [
 }
 
 export def get-providers [
-    key: string,
+    file_hash: string,
     --node: string = $DEFAULT_IP
 ]: nothing -> any {
-    log debug $"getting providers of ($key) from ($node)"
-    $"get-providers" | run-command $node --post-body $key
+    log debug $"getting providers of ($file_hash) from ($node)"
+    $"get-providers" | run-command $node --post-body $file_hash
 }
 
 export def bootstrap [
@@ -164,16 +164,6 @@ export def bootstrap [
     "bootstrap" | run-command $node
 }
 
-export def add-file [
-    key: string,
-    content: string,
-    --node: string = $DEFAULT_IP
-]: nothing -> any {
-    log debug $"adding ($content) to ($node)"
-    $"add-file/($key)/($content)" | run-command $node
-}
-
-##! Change this to not require the block dir path (as everything should be in the .share path)
 export def decode-blocks [
     block_dir: string,
     block_hashes: list<string>,
@@ -190,7 +180,7 @@ export def encode-file [
     --replace-blocks = true,
     --k: int = 3,
     --n: int = 5,
-    --encoding_method: string = Random,
+    --encoding-method: string = Random,
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
     log debug $"encoding the file ($file_path)"
@@ -202,7 +192,7 @@ export def get-block-from [
     peer_id_base_58: string,
     file_hash: string,
     block_hash: string,
-    --no_save
+    --no-save
     --node: string = $DEFAULT_IP
 ] nothing -> any {
     log debug $"get block ($block_hash) part of file ($file_hash) from peer ($peer_id_base_58)"
@@ -219,29 +209,28 @@ def "slash replace" [] string -> string {
 export def get-file [
     file_hash: string,
     output_filename: string,
-    --powers_path: string = $POWERS_PATH,
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
     log debug $"Getting file ($file_hash)"
-    $"get-file/($file_hash)/($output_filename)/($powers_path | slash replace)" | run-command $node
+    $"get-file/($file_hash)/($output_filename)" | run-command $node
 
 }
 
 export def get-blocks-info-from [
     peer_id_base_58: string,
-    filename: string,
+    file_hash: string,
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
-    log debug $"Getting the list of blocks from ($peer_id_base_58) for file ($filename)"
-    $"get-blocks-info-from/($peer_id_base_58)/($filename)" | run-command $node
+    log debug $"Getting the list of blocks from ($peer_id_base_58) for file ($file_hash)"
+    $"get-blocks-info-from/($peer_id_base_58)/($file_hash)" | run-command $node
 }
 
 export def get-block-list [
-    filename: string,
+    file_hash: string,
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
-    log debug $"Getting the list of blocks for file ($filename) from own node"
-    $"get-block-list/($filename)" | run-command $node
+    log debug $"Getting the list of blocks for file ($file_hash) from own node"
+    $"get-block-list/($file_hash)" | run-command $node
 }
 
 export def node-info [
@@ -254,7 +243,7 @@ export def node-info [
 export def send-block-list [
     file_hash: string,
     block_list: list<string>,
-    --strategy_name: string = "RoundRobin"
+    --strategy-name: string = "RoundRobin"
     --node: string = $DEFAULT_IP,
 ] nothing -> any {
     log debug $"Sending the list of blocks ($block_list) from file ($file_hash) using the strategy ($strategy_name)"
@@ -271,17 +260,18 @@ export def send-block-to [
     $"send-block-to" | run-command $node --post-body [$peer_id_base_58, $file_hash, $block_hash]
 }
 
-export def get-available-storage [
+export def get-available-send-storage [
     --node: string = $DEFAULT_IP
 ] nothing -> any {
     log debug $"Getting the size left available for sending blocks from ($node)"
-    $"get-available-storage" | run-command $node
+    $"get-available-send-storage" | run-command $node
 }
 
+# TODO: fix this, an integer is not accepted as data for the post body of Nushell's http post, but using a string doesn't allow parsing the int from the string on Rust's side
 export def change-available-send-storage [
     --node: string = $DEFAULT_IP,
     new_storage_space: int,
 ] nothing -> any {
     log debug $"Changing the total available storage space to be ($new_storage_space)"
-    $"change-available-send-storage" | run-command $node --post-body $'($new_storage_space)'
+    $"change-available-send-storage" | run-command $node --post-body $new_storage_space
 }

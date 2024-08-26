@@ -1,6 +1,6 @@
 mod app;
 mod commands;
-mod dragoon_network;
+mod dragoon_swarm;
 mod error;
 mod peer_block_info;
 mod send_block_to;
@@ -27,7 +27,7 @@ use anyhow::Result;
 use ark_bls12_381::{Fr, G1Projective};
 use ark_poly::univariate::DensePolynomial;
 
-use crate::dragoon_network::DragoonNetwork;
+use crate::dragoon_swarm::DragoonNetwork;
 
 #[derive(Parser)]
 #[command(name = "Dragoonfly")]
@@ -106,7 +106,7 @@ pub(crate) async fn main() -> Result<()> {
             get(commands::create_cmd_get_block_from),
         )
         .route(
-            "/get-file/:file_hash/:output_filename/:powers_path",
+            "/get-file/:file_hash/:output_filename",
             get(commands::create_cmd_get_file),
         )
         .route(
@@ -120,7 +120,7 @@ pub(crate) async fn main() -> Result<()> {
         .route("/node-info", get(commands::create_cmd_node_info))
         .route("/send-block-to", post(commands::create_cmd_send_block_to))
         .route(
-            "/get-available-storage",
+            "/get-available-send-storage",
             get(commands::create_cmd_get_available_storage),
         )
         .route(
@@ -161,7 +161,7 @@ pub(crate) async fn main() -> Result<()> {
     info!("Peer ID: {} ({})", peer_id, seed);
 
     info!("Creating the swarm");
-    let swarm = dragoon_network::create_swarm(kp).await?;
+    let swarm = dragoon_swarm::create_swarm(kp).await?;
     let network = DragoonNetwork::new(
         swarm,
         cmd_receiver,

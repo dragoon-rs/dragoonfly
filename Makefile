@@ -21,7 +21,7 @@ test:
 ifeq ($(ssh_addr_file),0)
 	nu help_func/execute_all_tests.nu
 else
-	nu help_func/execute_all_tests.nu --ssh_addr_file $(ssh_addr_file)
+	nu help_func/execute_all_tests.nu --ssh-addr-file $(ssh_addr_file)
 endif
 
 show:

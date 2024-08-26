@@ -16,7 +16,7 @@ use tokio::sync::{
 use tracing::{error, info};
 
 use crate::app::AppState;
-use crate::dragoon_network::BlockResponse;
+use crate::dragoon_swarm::BlockResponse;
 use crate::error::DragoonError;
 use crate::peer_block_info::PeerBlockInfo;
 use crate::send_strategy::SendId;
@@ -215,7 +215,7 @@ impl std::fmt::Display for DragoonCommand {
             DragoonCommand::DialMultiple { .. } => write!(f, "dial-multiple"),
             DragoonCommand::DialSingle { .. } => write!(f, "dial-single"),
             DragoonCommand::EncodeFile { .. } => write!(f, "encode-file"),
-            DragoonCommand::GetAvailableStorage { .. } => write!(f, "get-available-storage"),
+            DragoonCommand::GetAvailableStorage { .. } => write!(f, "get-available-send-storage"),
             DragoonCommand::GetBlockDir { .. } => write!(f, "get-block-dir"),
             DragoonCommand::GetBlockFrom { .. } => write!(f, "get-block-from"),
             DragoonCommand::GetBlocksInfoFrom { .. } => write!(f, "get-blocks-info-from"),
@@ -315,6 +315,7 @@ pub(crate) async fn create_cmd_change_available_send_storage(
     dragoon_command!(state, ChangeAvailableSendStorage, new_storage_size)
 }
 
+// ! change this to not longer require block dir and block hashes but just the file hash
 pub(crate) async fn create_cmd_decode_blocks(
     State(state): State<Arc<AppState>>,
     Json((block_dir, block_hashes, output_filename)): Json<(String, Vec<String>, String)>,

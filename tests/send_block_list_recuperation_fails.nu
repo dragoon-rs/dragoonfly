@@ -1,12 +1,12 @@
 use ../cli/swarm.nu *
-use ../cli/app.nu
+use ../cli/dragoon.nu
 use ../cli/network_builder.nu *
 use std assert
 use ../help_func/exit_func.nu exit_on_error
 
 # No need to modify for remote tests
 
-def main [--ssh_addr_file: path] {
+def main [--ssh-addr-file: path] {
 
     # define variables
     let test_file: path = "tests/assets/dragoon_32/dragoon_32x32.png"
@@ -24,12 +24,12 @@ def main [--ssh_addr_file: path] {
         ]
 
     # create the network topology
-    let SWARM = build_network --no-shell --replace_file_dir $connection_list --ssh_addr_file=$ssh_addr_file --storage_space [10, 3, 1] --unit_list [G, K, K]
+    let SWARM = build_network --no-shell --replace-file-dir $connection_list --ssh-addr-file=$ssh_addr_file --storage-space [10, 3, 1] --unit-list [G, K, K]
 
     try {
         # Encode the file into blocks, put them to a directory named blocks next to the file
         print "Node 0 encodes the file into blocks"
-        let encode_res = app encode-file --node $SWARM.0.ip_port $test_file
+        let encode_res = dragoon encode-file --node $SWARM.0.ip_port $test_file
         let block_hashes = $encode_res.1 | from json  #! This is a string not a list, need to convert
         let file_hash = $encode_res.0
 
@@ -38,7 +38,7 @@ def main [--ssh_addr_file: path] {
         print $"The hash of the file is: ($file_hash)"
 
         print "\nNode 0 sends the blocks to node 1 and 2"
-        app send-block-list --node $SWARM.0.ip_port $file_hash $block_hashes
+        dragoon send-block-list --node $SWARM.0.ip_port $file_hash $block_hashes
         print "Node 0 finished sending blocks to node 1 and 2\n"
 
         print "Killing the swarm"

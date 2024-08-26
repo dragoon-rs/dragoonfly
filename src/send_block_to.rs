@@ -24,7 +24,7 @@ use tokio::sync::{
 };
 use tracing::{debug, error};
 
-use crate::dragoon_network;
+use crate::dragoon_swarm;
 
 pub(crate) use protocol::handle_send_block_exchange_sender_side as send_block_to;
 
@@ -107,12 +107,10 @@ impl SendBlockHandler {
         peer_id_base_58: String,
     ) -> Result<()> {
         total_block_size_on_disk.fetch_add(size_of_block, Ordering::SeqCst);
-        let old_send_file_path: PathBuf = [
-            file_dir,
-            PathBuf::from(dragoon_network::SEND_BLOCK_FILE_NAME),
-        ]
-        .iter()
-        .collect();
+        let old_send_file_path: PathBuf =
+            [file_dir, PathBuf::from(dragoon_swarm::SEND_BLOCK_FILE_NAME)]
+                .iter()
+                .collect();
         let mut new_send_file_path = old_send_file_path.clone();
         new_send_file_path.set_extension("new.txt");
         //TODO remove the created file if we return on an error

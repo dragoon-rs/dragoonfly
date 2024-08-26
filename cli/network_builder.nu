@@ -1,5 +1,5 @@
 use swarm.nu *
-use app.nu
+use dragoon.nu
 use std log
 
 # Makes a network topology by connecting nodes according to the given network matrix
@@ -37,21 +37,24 @@ use std log
 # Note that because of type conversion, an empty list is not acceptable, so you can just write [0] instead of empty lists (will be ignored for all nodes), since 0 is the smallest node number
 #
 export def build_network [
-    connection_list: list<list<int>>, 
-    --no-shell,
-    --no_compile,
-    --replace_file_dir,
-    --ssh_addr_file: path,
-    --storage_space: list<int>,
-    --unit_list: list<string>,
-    --label_list: list<string> = [],
+    connection_list: list<list<int>>, # list of connection for each node, see cmd help for format
+    --no-shell, # do not create a subshell after finishing this command
+    --no-compile, # do not compile the rust binary again
+    --replace-file-dir, # clear the file directory for each node
+    --ssh-addr-file: path, # Add a file containing ssh addresses, first line is always skipped, in the format: username, ip
+                            # See ssh_addr.txt for example
+                            # If no file is provided, nodes are run on localhost, port 3000, 3001, 3002, etc.
+                            # The file should contain at least as many distinct username + ip as there are nodes
+    --storage-space: list<int>, # The space for blocks received via send request, default: 20, list should be of size number of nodes
+    --unit-list: list<string>, # The unit in powers of 10 for the space received via send request, default: G; possible values: "", K, M, G, T, list should be of size number of nodes
+    --label-list: list<string> = [], # list of labels for node names, list should be of size number of nodes, default is peer id,  no space allowed in names
     ]: nothing -> table {
     let matrix_size = $connection_list | length
 
     print $"(ansi light_green_reverse)Launching the network(ansi reset)"
-    let SWARM = swarm create $matrix_size --ssh_addr_file $ssh_addr_file --storage_space $storage_space --unit_list $unit_list
+    let SWARM = swarm create $matrix_size --ssh-addr-file $ssh_addr_file --storage-space $storage_space --unit-list $unit_list
     mut run_options = ""
-    let log_dir = swarm run --no-shell --no_compile=$no_compile --replace_file_dir=$replace_file_dir --label_list=$label_list $SWARM
+    let log_dir = swarm run --no-shell --no-compile=$no_compile --replace-file-dir=$replace_file_dir --label-list=$label_list $SWARM
 
     print $SWARM
 
@@ -78,7 +81,7 @@ export def build_network [
             # try to listen on node 0, this is to allow time for the ports to setup properly
             try {
                 sleep 1sec
-                app listen --node $SWARM.0.ip_port $SWARM.0.multiaddr
+                dragoon listen --node $SWARM.0.ip_port $SWARM.0.multiaddr
                 log debug "\nExiting the try-listen for node 0 after success"
                 $node_is_setup = true
             } catch {
@@ -94,7 +97,7 @@ export def build_network [
             log debug $"Trying to listen on ($i)"
             # ssh here to launch the listen from the node itself
             if (($SWARM | get $i | get user) == "local") {
-                app listen --node ($SWARM | get $i | get ip_port) ($SWARM | get $i | get multiaddr)
+                dragoon listen --node ($SWARM | get $i | get ip_port) ($SWARM | get $i | get multiaddr)
             } else {
                 let node = ($SWARM | get $i)
                 let ip = ($node | get ip_port | parse "{ip}:{port}" | into record | get ip)
@@ -111,8 +114,8 @@ export def build_network [
             let ip_port = $SWARM | get $i | get ip_port 
             let connect_to = ($connection_list | get $i) | filter {|x| $x > $i} | each {|x| $SWARM | get $x | get multiaddr}
             #? do commands still work when using the --node like that
-            app dial-multiple --node $ip_port $connect_to
-            app node-info --node $ip_port
+            dragoon dial-multiple --node $ip_port $connect_to
+            dragoon node-info --node $ip_port
         }
 
         log info "Finished dialing"
@@ -124,7 +127,7 @@ export def build_network [
             $env.PROMPT_COMMAND = "SWARM-CONTROL-PANEL"
             $env.NU_LOG_LEVEL = "DEBUG"
             $env.SWARM_LOG_DIR = ($log_dir)
-            use cli/app.nu
+            use cli/dragoon.nu
             use cli/swarm.nu ["swarm kill", "swarm list", "swarm log", "bytes decode"]
             const SWARM = ($SWARM |to nuon)
             '

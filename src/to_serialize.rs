@@ -6,7 +6,7 @@ use serde::ser::Serialize;
 
 use crate::send_strategy::SendId;
 use crate::{
-    commands::SerNetworkInfo, dragoon_network::BlockResponse, peer_block_info::PeerBlockInfo,
+    commands::SerNetworkInfo, dragoon_swarm::BlockResponse, peer_block_info::PeerBlockInfo,
 };
 
 // can't implement Serialize for Json as those are a external Trait and Struct, so we need a wrapper
