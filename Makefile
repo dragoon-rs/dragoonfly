@@ -44,9 +44,5 @@ unset-proxy:
 	unset HTTPS_PROXY
 	unset https_proxy
 
-init:
-	git submodule update --init komodo
-
-
 export-proxy:
 	export HTTP_PROXY='proxy.isae.fr:3128'

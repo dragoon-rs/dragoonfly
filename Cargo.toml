@@ -15,7 +15,7 @@ serde = { version = "1.0.192", features = ["derive"] }
 regex = "1.10.2"
 thiserror = "1.0.50"
 futures-timer = { version = "3.0.2", features = [] }
-komodo = {path = "./komodo"}
+komodo = { version = "1.0.0", features = ["fs"] }
 ark-ff = "0.4.2"
 ark-ec = "0.4.2"
 ark-bls12-381 = "0.4.0"

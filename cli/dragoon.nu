@@ -1,5 +1,4 @@
 use std log
-use ../komodo/binary.nu "bytes from_int"
 
 const HTTP = {
     OK: 200,
@@ -8,6 +7,10 @@ const HTTP = {
 
 const DEFAULT_IP = "127.0.0.1:3000"
 const POWERS_PATH = "setup/powers/powers_test_Fr_155kB"
+
+def "bytes from_int" []: [int -> binary, list<int> -> binary] {
+    each { into binary --compact } | bytes collect
+}
 
 # def "http get-curl" [url: string, --allow-errors, --full]: nothing -> record<body: string, status: int> {
 #     $url

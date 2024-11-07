@@ -5,7 +5,7 @@ use ark_poly::DenseUVPolynomial;
 use ark_serialize::{CanonicalDeserialize, Compress, Validate};
 use ark_std::ops::Div;
 use futures::{AsyncReadExt, AsyncWriteExt};
-use komodo::{verify, Block};
+use komodo::semi_avid::{verify, Block};
 use libp2p::{PeerId, Stream};
 use std::path::PathBuf;
 use std::{

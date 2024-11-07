@@ -50,12 +50,11 @@ use crate::send_strategy_impl::{self, StrategyName};
 
 use komodo::{
     self,
+    algebra::linalg::Matrix,
     fec::{self, Shard},
     fs,
-    linalg::Matrix,
-    verify,
+    semi_avid::{verify, Block},
     zk::Powers,
-    Block,
 };
 
 use resolve_path::PathResolveExt;
@@ -1449,8 +1448,8 @@ where {
         };
         let shards = fec::encode::<F>(&bytes, &encoding_mat)?;
         let powers = get_powers(powers_path).await?;
-        let proof = komodo::prove::<F, G, P>(&bytes, &powers, encode_mat_k)?;
-        let blocks = komodo::build::<F, G, P>(&shards, &proof);
+        let proof = komodo::semi_avid::prove::<F, G, P>(&bytes, &powers, encode_mat_k)?;
+        let blocks = komodo::semi_avid::build::<F, G, P>(&shards, &proof);
         let block_dir = get_block_dir(&output_file_dir, file_hash.clone());
         info!(
             "Checking if the block directory already exists or not: {:?}",
