@@ -1,3 +1,4 @@
+NU="nu"
 .PHONY: fmt fmt-check check clippy test show show-proxy unset-proxy toto
 
 ssh_addr_file = 0
@@ -19,9 +20,9 @@ clippy:
 test:
 	cargo build --release
 ifeq ($(ssh_addr_file),0)
-	nu help_func/execute_all_tests.nu
+	${NU} --no-config-file help_func/execute_all_tests.nu
 else
-	nu help_func/execute_all_tests.nu --ssh-addr-file $(ssh_addr_file)
+	${NU} --no-config-file help_func/execute_all_tests.nu --ssh-addr-file $(ssh_addr_file)
 endif
 
 show:
@@ -30,7 +31,7 @@ show:
 	rustc --version
 	cargo --version
 	cargo clippy --version
-	nu --version
+	${NU} --version
 
 show-proxy:
 	@echo "HTTP_PROXY = ${HTTP_PROXY}"

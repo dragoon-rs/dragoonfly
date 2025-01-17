@@ -13,9 +13,9 @@ def main [--ssh-addr-file: path] {
         print $"\n(ansi yellow_reverse)    LAUNCHING TEST ($test_name)(ansi reset)\n"
 
         (if $ssh_addr_file == null {
-            nu $test_name
+            ^$nu.current-exe --no-config-file $test_name
         } else {
-            nu $test_name --ssh-addr-file=$ssh_addr_file
+            ^$nu.current-exe --no-config-file $test_name --ssh-addr-file=$ssh_addr_file
         }) e>| do { |e| # capture the possible error and check if it's empty or not
         let maybe_error = ($e | parse -r "(Error: .*)")
             if ($maybe_error | is-empty) {
