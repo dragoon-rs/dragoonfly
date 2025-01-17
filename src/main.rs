@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::signal;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{error, info};
 
 use anyhow::Result;
 
@@ -73,7 +73,7 @@ pub(crate) async fn main() -> Result<()> {
     let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
 
     let router = Router::new()
-        .route("/listen/:addr", get(commands::create_cmd_listen))
+        .route("/listen/{multiaddr}", get(commands::create_cmd_listen))
         .route("/get-listeners", get(commands::create_cmd_get_listeners))
         .route(
             "/get-network-info",
@@ -102,19 +102,19 @@ pub(crate) async fn main() -> Result<()> {
         .route("/decode-blocks", post(commands::create_cmd_decode_blocks))
         .route("/encode-file", post(commands::create_cmd_encode_file))
         .route(
-            "/get-block-from/:peer_id_base_58/:file_hash/:block_hash/:save_to_disk",
+            "/get-block-from/{peer_id_base_58}/{file_hash}/{block_hash}/{save_to_disk}",
             get(commands::create_cmd_get_block_from),
         )
         .route(
-            "/get-file/:file_hash/:output_filename",
+            "/get-file/{file_hash}/{output_filename}",
             get(commands::create_cmd_get_file),
         )
         .route(
-            "/get-block-list/:file_hash",
+            "/get-block-list/{file_hash}",
             get(commands::create_cmd_get_block_list),
         )
         .route(
-            "/get-blocks-info-from/:peer_id_base_58/:file_hash",
+            "/get-blocks-info-from/{peer_id_base_58}/{file_hash}",
             get(commands::create_cmd_get_blocks_info_from),
         )
         .route("/node-info", get(commands::create_cmd_node_info))
@@ -150,11 +150,13 @@ pub(crate) async fn main() -> Result<()> {
         Units::T => 10usize.pow(12),
     };
     let total_available_storage_for_send = cli.storage_space * multiplier;
-
-    let http_server = axum::Server::bind(&ip_port).serve(router.into_make_service());
+    let listener = tokio::net::TcpListener::bind(ip_port).await?;
     info!("Spawning the http server");
-    tokio::spawn(http_server);
-
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, router.into_make_service()).await {
+            error!("server error: {}", error);
+        }
+    });
     let kp = get_keypair(seed);
     let peer_id = kp.public().to_peer_id();
     info!("IP/port: {}", ip_port);
