@@ -49,7 +49,7 @@ features = [
     "tcp",
     "yamux",
 ]
-version = "0.53.0"
+version = "0.53.2"
 
 [profile.ci-check]
 inherits = "dev"
